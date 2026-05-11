@@ -1,6 +1,6 @@
 import sys, os, time, datetime
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "/scratch2/bsc26f19/projects/ecg_ptbxl_benchmarking/code")
+sys.path.insert(0, "/scratch2/bsc26f19/projects/bachelor_thesis_codes/code")
 
 from scp_experiment import SCP_Experiment
 import torch.nn as nn
@@ -212,7 +212,7 @@ class ModelWrapper:
         return self.classifier.predict(X)
 # ─────────────────────────────────────────────────
 
-DATAFOLDER   = "/scratch2/bsc26f19/projects/ecg_ptbxl_benchmarking/data/ptbxl/"
+DATAFOLDER   = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/data/ptbxl/"
 OUTPUTFOLDER = "./output/"
 
 models = [
