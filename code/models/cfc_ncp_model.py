@@ -208,7 +208,7 @@ class NCPClassifier:
 
         # preserve the best model state
         import os
-        save_dir = "/scratch2/bsc26f19/projects/ecg_ptbxl_benchmarking/code/saved_models"
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../saved_models")
         os.makedirs(save_dir, exist_ok=True)
         torch.save(best_state, os.path.join(save_dir, "cfc_ncp.pt"))
         print(f"Model saved to {save_dir}/cfc_ncp.pt")

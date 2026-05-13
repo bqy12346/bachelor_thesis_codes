@@ -5,7 +5,7 @@ import scipy.io
 from scipy.signal import resample
 from sklearn.metrics import roc_auc_score
 
-sys.path.insert(0, "/scratch2/bsc26f19/projects/ecg_ptbxl_benchmarking/code")
+sys.path.insert(0, "/scratch2/bsc26f19/projects/bachelor_thesis_codes/code")
 
 # ── 标签映射（顺序对齐mlb.classes_: CD/HYP/MI/NORM/STTC）──
 SNOMED_TO_CLASS = {
@@ -149,7 +149,7 @@ def compute_auc(y_true, y_pred, model_name):
 # ── 主流程 ────────────────────────────────────────
 if __name__ == "__main__":
 
-    BASE    = "/scratch2/bsc26f19/projects/ecg_ptbxl_benchmarking"
+    BASE    = "/scratch2/bsc26f19/projects/bachelor_thesis_codes"
     OUT_DIR = f"{BASE}/code/output/exp_cfc_ncp/models"
     SCALER  = f"{BASE}/code/output/exp_cfc_ncp/data/standard_scaler.pkl"
     SAVED   = f"{BASE}/code/saved_models"
