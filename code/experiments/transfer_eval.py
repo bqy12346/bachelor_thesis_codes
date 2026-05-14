@@ -187,7 +187,9 @@ if __name__ == "__main__":
                 results[name] = None
 
     # ── CfC-NCP ──
-    cfc_pt = f"{SAVED}/cfc_ncp.pt"
+    cfc_files = sorted(glob.glob(f"{SAVED}/cfc_ncp_*.pt"))
+    cfc_pt = cfc_files[-1] if cfc_files else None
+    print(f"Using CfC weights: {cfc_pt}")
     if os.path.exists(cfc_pt):
         print(f"\nPredicting with cfc_ncp...")
         from models.cfc_ncp_model import NCPNet
@@ -196,7 +198,9 @@ if __name__ == "__main__":
         results["cfc_ncp"] = compute_auc(y_true, y_pred, "cfc_ncp")
 
     # ── LTC-NCP ──
-    ltc_pt = f"{SAVED}/ltc_ncp.pt"
+    ltc_files = sorted(glob.glob(f"{SAVED}/ltc_ncp_*.pt"))
+    ltc_pt = ltc_files[-1] if ltc_files else None
+    print(f"Using LTC weights: {ltc_pt}")
     if os.path.exists(ltc_pt):
         print(f"\nPredicting with ltc_ncp...")
         from models.ltc_ncp_model import NCPNet
