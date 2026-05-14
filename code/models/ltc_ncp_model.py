@@ -1,3 +1,6 @@
+import os
+import datetime
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -132,11 +135,12 @@ class NCPClassifier:
         print(f"Done. Best val_loss={best_val_loss:.4f}")
 
         # preserve the best model state
-        import os
-        save_dir = save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
         os.makedirs(save_dir, exist_ok=True)
-        torch.save(best_state, os.path.join(save_dir, "ltc_ncp.pt"))
-        print(f"Model saved to {save_dir}/ltc_ncp.pt")
+        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"ltc_ncp_{ts}.pt"
+        torch.save(best_state, os.path.join(save_dir, filename))
+        print(f"Model saved to {save_dir}/{filename}")
 
     def predict(self, X):
         self.model.eval()

@@ -150,8 +150,8 @@ def compute_auc(y_true, y_pred, model_name):
 if __name__ == "__main__":
 
     BASE    = "/scratch2/bsc26f19/projects/bachelor_thesis_codes"
-    OUT_DIR = f"{BASE}/code/output/exp_cfc_ncp/models"
-    SCALER  = f"{BASE}/code/output/exp_cfc_ncp/data/standard_scaler.pkl"
+    OUT_DIR = f"{BASE}/code/output/exp_superdiagnostic/models"
+    SCALER  = f"{BASE}/code/output/exp_superdiagnostic/data/standard_scaler.pkl"
     SAVED   = f"{BASE}/code/saved_models"
 
     CPSC_DIRS = [
@@ -250,7 +250,7 @@ if __name__ == "__main__":
                 fontsize=8.5, fontweight="bold")
 
     plt.tight_layout()
-    out = f"{BASE}/code/output/results/plots/transfer_cpsc2018.png"
+    out = f"{BASE}/code/output/exp_superdiagnostic/results/plots/transfer_cpsc2018.png"
     os.makedirs(os.path.dirname(out), exist_ok=True)
     plt.savefig(out, dpi=150, bbox_inches="tight")
     plt.close()
