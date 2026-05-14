@@ -33,7 +33,7 @@ class Logger:
         self.log_file.close()
 
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-log_path  = os.path.join("./output/", "logs", f"exp_cfc_ncp_{timestamp}.log")
+log_path = os.path.join("./output/", "exp_superdiagnostic", "logs", f"exp_superdiagnostic_{timestamp}.log")
 logger    = Logger(log_path)
 sys.stdout = logger
 # ─────────────────────────────────────────────────
@@ -313,7 +313,7 @@ models = [
 ]
 
 exp = SCP_Experiment(
-    experiment_name    = "exp_cfc_ncp",
+    experiment_name    = "exp_superdiagnostic",
     task               = "superdiagnostic",
     datafolder         = DATAFOLDER,
     outputfolder       = OUTPUTFOLDER,
@@ -543,11 +543,12 @@ try:
     print("="*50)
 
     # ── [统计新增] 保存 CSV ───────────────────────
-    csv_path = os.path.join(OUTPUTFOLDER, "results", "model_stats.csv")
+    csv_path = os.path.join(OUTPUTFOLDER, "exp_superdiagnostic", "results", "model_stats.csv")    
+    save_results_csv(stat_records, csv_path)
     save_results_csv(stat_records, csv_path)
 
     # ── [统计新增] 绘制对比图 ─────────────────────
-    plot_dir = os.path.join(OUTPUTFOLDER, "results", "plots")
+    plot_dir = os.path.join(OUTPUTFOLDER, "exp_superdiagnostic", "results", "plots")
     plot_comparison(stat_records, plot_dir)
 
 finally:
