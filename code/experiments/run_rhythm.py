@@ -261,17 +261,17 @@ models = [
         }
     },
 
-    {
-        "modelname": "ltc_ncp",
-        "modeltype": "LTC_NCP",
-        "parameters": {
-            "motor_neurons": 64,
-            "mixed_memory":  True,
-            "epochs":        50,
-            "batch_size":    32,
-            "lr":            0.002,
-        }
-    },
+    # {
+    #     "modelname": "ltc_ncp",
+    #     "modeltype": "LTC_NCP",
+    #     "parameters": {
+    #         "motor_neurons": 64,
+    #         "mixed_memory":  True,
+    #         "epochs":        50,
+    #         "batch_size":    32,
+    #         "lr":            0.002,
+    #     }
+    # },
 
     {
         "modelname": "fastai_inception1d",
