@@ -25,14 +25,20 @@ class SCP_Experiment():
         self.sampling_frequency = sampling_frequency
 
         # create folder structure if needed
-        if not os.path.exists(self.outputfolder+self.experiment_name):
-            os.makedirs(self.outputfolder+self.experiment_name)
-            if not os.path.exists(self.outputfolder+self.experiment_name+'/results/'):
-                os.makedirs(self.outputfolder+self.experiment_name+'/results/')
-            if not os.path.exists(outputfolder+self.experiment_name+'/models/'):
-                os.makedirs(self.outputfolder+self.experiment_name+'/models/')
-            if not os.path.exists(outputfolder+self.experiment_name+'/data/'):
-                os.makedirs(self.outputfolder+self.experiment_name+'/data/')
+        # if not os.path.exists(self.outputfolder+self.experiment_name):
+            # os.makedirs(self.outputfolder+self.experiment_name)
+            # if not os.path.exists(self.outputfolder+self.experiment_name+'/results/'):
+            #     os.makedirs(self.outputfolder+self.experiment_name+'/results/')
+            # if not os.path.exists(outputfolder+self.experiment_name+'/models/'):
+            #     os.makedirs(self.outputfolder+self.experiment_name+'/models/')
+            # if not os.path.exists(outputfolder+self.experiment_name+'/data/'):
+            #     os.makedirs(self.outputfolder+self.experiment_name+'/data/')
+            # create folder structure if needed
+        
+        os.makedirs(self.outputfolder + self.experiment_name, exist_ok=True)
+        os.makedirs(self.outputfolder + self.experiment_name + '/results/', exist_ok=True)
+        os.makedirs(self.outputfolder + self.experiment_name + '/models/', exist_ok=True)
+        os.makedirs(self.outputfolder + self.experiment_name + '/data/', exist_ok=True)
 
     def prepare(self):
         # Load PTB-XL data
