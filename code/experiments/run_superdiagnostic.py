@@ -52,17 +52,32 @@ def compute_auc(y_true, y_pred, split_name):
     return macro_auc
 # ─────────────────────────────────────────────────
 
+# ── Recall 辅助函数 ──────────────────────────────────
+def compute_recall(y_true, y_pred, split_name, threshold=0.5):
+    from sklearn.metrics import recall_score
+    y_pred_binary = (y_pred >= threshold).astype(int)
+    valid_cols = [i for i in range(y_true.shape[1])
+                  if len(np.unique(y_true[:, i])) > 1]
+    if not valid_cols:
+        return None
+    recall = recall_score(
+        y_true[:, valid_cols], y_pred_binary[:, valid_cols],
+        average='macro', zero_division=0)
+    print(f"  [{split_name} Recall] macro = {recall:.4f}")
+    return float(recall)
+# ─────────────────────────────────────────────────
+
 # ── [统计新增] CSV 保存 ────────────────────────────
 def save_results_csv(records, csv_path):
     """
     records: list of dict，每条对应一个模型的完整统计
     字段: model, total_params, trainable_params,
-          train_time_s, val_auc, test_auc, timestamp
+          train_time_s, val_auc, test_auc, test_recall, timestamp
     追加写入，支持多次实验累积对比。
     """
     os.makedirs(os.path.dirname(csv_path), exist_ok=True)
     fieldnames = ["model", "total_params", "trainable_params",
-                  "train_time_s", "val_auc", "test_auc", "timestamp"]
+                  "train_time_s", "val_auc", "test_auc", "test_recall", "timestamp"]
     write_header = not os.path.exists(csv_path)
     with open(csv_path, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -76,7 +91,7 @@ def save_results_csv(records, csv_path):
 # ── [统计新增] 对比图绘制 ──────────────────────────
 def plot_comparison(records, plot_dir):
     """
-    绘制四张子图：训练时长 / Val AUC / Test AUC / Total Parameters，按模型分组。
+    绘制五张子图：训练时长 / Val AUC / Test AUC / Test Recall / Total Parameters，按模型分组。
     ensemble 不参与训练时长/参数图，但参与 AUC 图。
     保存为 comparison_<timestamp>.png
     """
@@ -100,7 +115,7 @@ def plot_comparison(records, plot_dir):
     PALETTE = ["#1565C0", "#E65100", "#2E7D32",
                "#6A1B9A", "#00838F", "#AD1457", "#4E342E", "#546E7A"]
 
-    fig, axes = plt.subplots(1, 4, figsize=(22, 5.5))
+    fig, axes = plt.subplots(1, 5, figsize=(27, 5.5))
     fig.patch.set_facecolor("#F5F5F5")
     for ax in axes:
         ax.set_facecolor("#FAFAFA")
@@ -150,6 +165,15 @@ def plot_comparison(records, plot_dir):
     bar_chart(axes[3], names_all, test_aucs,
               "Test AUC (macro)", "AUC",
               color_offset=4, fmt=".4f", ylim=(auc_min2, 1.0))
+    
+    # 子图5：Test Recall
+    recall_rec = [r for r in all_rec if r.get("test_recall", "N/A") != "N/A"]
+    names_recall  = [r["model"] for r in recall_rec]
+    recall_vals   = [float(r["test_recall"]) for r in recall_rec]
+    recall_min    = max(0.0, min(recall_vals) - 0.06) if recall_vals else 0
+    bar_chart(axes[4], names_recall, recall_vals,
+          "Test Recall (macro)", "Recall",
+          color_offset=5, fmt=".4f", ylim=(recall_min, 1.0))
 
     fig.suptitle(f"Model Comparison  |  {timestamp}",
                  fontsize=13, fontweight="bold", color="#212121", y=1.02)
@@ -382,8 +406,6 @@ def patched_perform(self):
                     _m = resnet1d_wang(num_classes=n_classes, input_channels=12)
                 elif modelname.startswith("fastai_inception1d"):
                     _m = inception1d(num_classes=n_classes, input_channels=12)
-                elif modelname.startswith("fastai_inception1d"):
-                    _m = inception1d(num_classes=n_classes, input_channels=12)
                 elif modelname.startswith("fastai_xresnet1d101"):
                     _m = xresnet1d101(num_classes=n_classes, input_channels=12)
                 else:
@@ -436,7 +458,8 @@ def patched_perform(self):
         print(f"{'='*45}")
         val_auc  = compute_auc(self.y_val,  y_val_pred,  "Val")
         test_auc = compute_auc(self.y_test, y_test_pred, "Test")
-        auc_summary[modelname] = {"val_auc": val_auc, "test_auc": test_auc}
+        test_recall = compute_recall(self.y_test, y_test_pred, "Test")
+        auc_summary[modelname] = {"val_auc": val_auc, "test_auc": test_auc, "test_recall": test_recall}
 
         # [统计新增] 记录该模型统计行
         stat_records.append({
@@ -446,6 +469,7 @@ def patched_perform(self):
             "train_time_s":     round(model.fit_time, 1) if model.fit_time is not None else "N/A",
             "val_auc":          round(val_auc,  4) if val_auc  is not None else "N/A",
             "test_auc":         round(test_auc, 4) if test_auc is not None else "N/A",
+            "test_recall":      round(test_recall, 4) if test_recall is not None else "N/A",
             "timestamp":        timestamp,
         })
 
@@ -474,7 +498,8 @@ def patched_perform(self):
     print(f"{'='*45}")
     ens_val_auc  = compute_auc(self.y_val,  ens_val_pred,  "Val")
     ens_test_auc = compute_auc(self.y_test, ens_test_pred, "Test")
-    auc_summary["ensemble"] = {"val_auc": ens_val_auc, "test_auc": ens_test_auc}
+    ens_test_recall = compute_recall(self.y_test, ens_test_pred, "Test")
+    auc_summary["ensemble"] = {"val_auc": ens_val_auc, "test_auc": ens_test_auc, "test_recall": ens_test_recall}
 
     # [统计新增] ensemble 行
     stat_records.append({
@@ -484,6 +509,7 @@ def patched_perform(self):
         "train_time_s":     "N/A",
         "val_auc":          round(ens_val_auc,  4) if ens_val_auc  is not None else "N/A",
         "test_auc":         round(ens_test_auc, 4) if ens_test_auc is not None else "N/A",
+        "test_recall":      round(ens_test_recall, 4) if ens_test_recall is not None else "N/A",
         "timestamp":        timestamp,
     })
 
@@ -534,17 +560,17 @@ try:
     print("\n" + "="*50)
     print("  AUC Summary")
     print("="*50)
-    print(f"  {'Model':<20} {'Val AUC':>10} {'Test AUC':>10}")
-    print(f"  {'-'*42}")
+    print(f"  {'Model':<20} {'Val AUC':>10} {'Test AUC':>10} {'Test Recall':>10}")
+    print(f"  {'-'*52}")
     for mname, aucs in auc_summary.items():
         val_str  = f"{aucs['val_auc']:.4f}"  if aucs['val_auc']  is not None else "   N/A"
         test_str = f"{aucs['test_auc']:.4f}" if aucs['test_auc'] is not None else "   N/A"
-        print(f"  {mname:<20} {val_str:>10} {test_str:>10}")
+        recall_str = f"{aucs['test_recall']:.4f}" if aucs['test_recall'] is not None else "   N/A"
+        print(f"  {mname:<20} {val_str:>10} {test_str:>10} {recall_str:>10}")
     print("="*50)
 
     # ── [统计新增] 保存 CSV ───────────────────────
     csv_path = os.path.join(OUTPUTFOLDER, "exp_superdiagnostic", "results", "model_stats.csv")    
-    save_results_csv(stat_records, csv_path)
     save_results_csv(stat_records, csv_path)
 
     # ── [统计新增] 绘制对比图 ─────────────────────
