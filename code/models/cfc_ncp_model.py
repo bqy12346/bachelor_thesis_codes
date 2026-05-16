@@ -140,8 +140,11 @@ class NCPClassifier:
         # [不变] Adam 优化器，参数包含 CNN 和 CfC-NCP 的所有权重
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
 
+        # [不变] 计算正负样本权重，解决多标签分类中的类别不平衡问题
+        pos_weight = (y_tr.shape[0] - y_tr.sum(dim=0)) / (y_tr.sum(dim=0) + 1e-6)
+        pos_weight = pos_weight.to(self.device)
+        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
 
-        criterion = nn.BCEWithLogitsLoss()
 
         X_tr = torch.tensor(X_train, dtype=torch.float32)
         y_tr = torch.tensor(y_train, dtype=torch.float32)
