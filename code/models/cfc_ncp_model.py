@@ -1,3 +1,255 @@
+# import os
+# import datetime
+# from tqdm import tqdm
+
+# import numpy as np
+# import torch
+# import torch.nn as nn
+# from torch.utils.data import DataLoader, TensorDataset
+
+
+# from ncps.wirings import NCP
+# from ncps.torch import CfC                   #  CfC replaces LTC
+
+
+# # ──────────────────────────────────────────────────────────────────────────────
+# # [CNN新增] 超参数说明
+# #
+# # CNN_CHANNELS : CNN 中间层通道数，控制提取的局部特征维度
+# # CNN_OUT_CH   : CNN 输出通道数，同时也是 CfC 的 input_size
+# #                原来 CfC input_size=12（原始导联数），现在变为 CNN_OUT_CH
+# # CNN_T_OUT    : CNN 压缩后的时间步数（原始 T=1000 → CNN_T_OUT=50）
+# #                计算方式：1000 // stride1 // stride2 = 1000 // 4 // 5 = 50
+# # ──────────────────────────────────────────────────────────────────────────────
+# CNN_CHANNELS = 32
+# CNN_OUT_CH   = 64
+# CNN_T_OUT    = 50    # 仅作注释说明用，实际由 stride 决定，不作为参数传入
+
+
+# # ──────────────────────────────────────────────────────────────────────────────
+# # Neural network
+# # ──────────────────────────────────────────────────────────────────────────────
+
+# class NCPNet(nn.Module):
+#     """CNN + CfC-NCP model for multi-label ECG classification.
+
+#     数据流（加入 CNN 后）：
+#         原始 ECG (B, T=1000, 12)
+#             │
+#             ▼  [CNN新增] Conv1d 两层，并行处理，压缩时间轴
+#         特征序列 (B, T=50, 64)
+#             │
+#             ▼  [不变] CfC-NCP，在压缩后的序列上做时序建模
+#         最后步输出 (B, motor_neurons)
+#             │
+#             ▼  [不变] 全连接分类头
+#         分类 logits (B, n_classes)
+#     """
+
+#     def __init__(self, n_classes: int, motor_neurons = 32, mixed_memory = False):
+#         super(NCPNet, self).__init__()
+
+#         # ── [CNN新增] 卷积前端：将原始 ECG 压缩为特征序列 ──────────────────
+#         # Conv1d 期望输入格式：(B, channels, T)，与 RNN 的 (B, T, channels) 相反
+#         # 因此在 forward() 中需要 permute 调换维度
+#         #
+#         # 第一层：kernel=5 覆盖约 50ms 的局部波形，stride=4 将 T 从 1000 压到 250
+#         #         12导联原始信号 → 32维局部波形特征
+#         # 第二层：继续压缩，T 从 250 → 50（每步约代表 200ms，约一个心跳节律单元）
+#         #         32维 → 64维，进一步组合特征
+#         # BatchNorm1d：稳定各通道的特征分布，加速收敛
+#         # GELU：比 ReLU 更平滑，在序列模型中效果更好
+#         self.cnn = nn.Sequential(
+#             nn.Conv1d(12, CNN_CHANNELS, kernel_size=5, stride=4, padding=2),
+#             nn.BatchNorm1d(CNN_CHANNELS),
+#             nn.GELU(),
+#             nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH, kernel_size=5, stride=5, padding=2),
+#             nn.BatchNorm1d(CNN_OUT_CH),
+#             nn.GELU(),
+#         )
+#         # ── [CNN新增] 结束 ──────────────────────────────────────────────────
+
+#         wiring = NCP(
+#             inter_neurons=32,  # default=16
+#             command_neurons=16,  # default=8
+#             motor_neurons=motor_neurons,
+#             sensory_fanout=8,
+#             inter_fanout=4,
+#             recurrent_command_synapses=4,
+#             motor_fanin=4,
+#         )
+
+#         self.rnn = CfC(
+#             # [CNN调整] input_size 从 12 改为 CNN_OUT_CH(=64)
+#             # 原来直接接收 12 导联原始电压，现在接收 CNN 提取的 64 维特征
+#             input_size=CNN_OUT_CH,
+#             units=wiring,
+#             batch_first=True,
+#             mixed_memory=mixed_memory,
+#             return_sequences=True,
+#         )
+
+#         self.fc = nn.Linear(self.rnn.output_size, n_classes)
+#         self.attn_fc = nn.Linear(self.rnn.output_size, 1)  # ← attention 评分层
+
+#     def forward(self, x: torch.Tensor):
+#         # x: (B, T=1000, 12)
+
+#         # ── [CNN新增] 卷积前端处理 ─────────────────────────────────────────
+#         # Conv1d 要求 (B, channels, T)，需先把时间轴和通道轴对调
+#         x = x.permute(0, 2, 1)          # (B, 12, 1000)
+#         x = self.cnn(x)                  # (B, 64, 50)
+#         x = x.permute(0, 2, 1)          # (B, 50, 64)  ← 恢复为 RNN 期望的格式
+#         # ── [CNN新增] 结束 ──────────────────────────────────────────────────
+
+#         # # [不变] CfC-NCP 时序建模，现在只需处理 50 步而非 1000 步
+#         # out, _ = self.rnn(x)             # out: (B, 50, motor_neurons)
+#         # out = out[:, -1, :]              # 取最后一步 → (B, motor_neurons)
+#         # return self.fc(out)              # (B, n_classes)
+#         # [改进] 加入时间注意力机制，自动学习哪个时间步更重要，而非固定取最后一步
+#         out, _ = self.rnn(x)
+#         attn = torch.softmax(self.attn_fc(out), dim=1)
+#         out = (out * attn).sum(dim=1)
+#         return self.fc(out)
+
+
+# # ──────────────────────────────────────────────────────────────────────────────
+# # fit() / predict() wrapper  (required by scp_experiment.py)
+# # ──────────────────────────────────────────────────────────────────────────────
+
+# class NCPClassifier:
+
+#     def __init__(
+#         self,
+#         motor_neurons = 32,
+#         mixed_memory = False,
+#         epochs = 50,
+#         batch_size = 32,
+#         lr = 0.002,
+#     ):
+#         self.motor_neurons = motor_neurons
+#         self.mixed_memory = mixed_memory
+#         self.epochs = epochs
+#         self.batch_size = batch_size
+#         self.lr = lr
+#         self.model = None
+#         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+#     def fit(self, X_train, y_train, X_val, y_val):
+#         n_classes = y_train.shape[1]
+#         self.model = NCPNet(
+#             n_classes     = n_classes,
+#             motor_neurons = self.motor_neurons,
+#             mixed_memory  = self.mixed_memory,
+#         ).to(self.device)
+
+#         # [不变] Adam 优化器，参数包含 CNN 和 CfC-NCP 的所有权重
+#         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
+        
+
+
+#         X_tr = torch.tensor(X_train, dtype=torch.float32)
+#         y_tr = torch.tensor(y_train, dtype=torch.float32)
+#         X_vl = torch.tensor(X_val,   dtype=torch.float32).to(self.device)
+#         y_vl = torch.tensor(y_val,   dtype=torch.float32).to(self.device)
+
+#         # [不变] 计算正负样本权重，解决多标签分类中的类别不平衡问题
+#         pos_weight = (y_tr.shape[0] - y_tr.sum(dim=0)) / (y_tr.sum(dim=0) + 1e-6)
+#         pos_weight = torch.clamp(pos_weight, max=10.0)
+#         pos_weight = pos_weight.to(self.device)
+#         criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
+#         # num_workers=0：避免 CUDA 初始化后 fork 子进程导致死锁
+#         # pin_memory：仅在 CUDA 可用时开启，加速 CPU→GPU 数据传输
+#         loader = DataLoader(
+#             TensorDataset(X_tr, y_tr),
+#             batch_size  = self.batch_size,
+#             shuffle     = True,
+#             num_workers = 0,
+#             pin_memory  = torch.cuda.is_available(),
+#         )
+
+#         # for 1cycle learning rate
+#         scheduler = torch.optim.lr_scheduler.OneCycleLR(
+#             optimizer,
+#             max_lr          = self.lr,
+#             steps_per_epoch = len(loader),
+#             epochs          = self.epochs,
+#         )
+
+#         best_val_loss = float("inf")
+#         best_state    = None
+#         patience      = self.epochs
+#         no_improve    = 0
+
+#         pbar = tqdm(range(self.epochs), desc="CfC-NCP", unit="epoch", dynamic_ncols=True)
+
+#         for epoch in pbar:
+#             self.model.train()
+#             epoch_loss = 0.0
+#             for xb, yb in loader:
+#                 xb, yb = xb.to(self.device), yb.to(self.device)
+#                 optimizer.zero_grad()
+#                 loss = criterion(self.model(xb), yb)
+#                 loss.backward()
+#                 optimizer.step()
+#                 scheduler.step() # 1cycle learning rate update
+#                 epoch_loss += loss.item()
+
+#             self.model.eval()
+#             with torch.no_grad():
+#                 val_loss = criterion(self.model(X_vl), y_vl).item()
+
+#             pbar.set_postfix({
+#                 "train": f"{epoch_loss/len(loader):.4f}",
+#                 "val":   f"{val_loss:.4f}",
+#                 "best":  f"{best_val_loss:.4f}",
+#             })
+
+#             if val_loss < best_val_loss:
+#                 best_val_loss = val_loss
+#                 best_state    = {k: v.cpu().clone()
+#                                 for k, v in self.model.state_dict().items()}
+#                 no_improve    = 0
+#             else:
+#                 no_improve += 1
+#                 if no_improve >= patience:
+#                     pbar.write(f"Early stopping at epoch {epoch+1}")
+#                     break
+
+#         pbar.close()
+#         self.model.load_state_dict(best_state)
+#         print(f"Best val_loss = {best_val_loss:.4f}")
+
+#         # preserve the best model state
+#         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
+#         os.makedirs(save_dir, exist_ok=True)
+#         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+#         filename = f"cfc_ncp_{ts}.pt"
+#         torch.save(best_state, os.path.join(save_dir, filename))
+#         print(f"Model saved to {save_dir}/{filename}")
+
+#     def predict(self, X):
+#         self.model.eval()
+#         X_t = torch.tensor(X, dtype=torch.float32)
+#         preds = []
+#         with torch.no_grad():
+#             for i in range(0, len(X_t), self.batch_size):
+#                 xb = X_t[i : i + self.batch_size].to(self.device)
+#                 probs = torch.sigmoid(self.model(xb))
+#                 preds.append(probs.cpu().numpy())
+#         return np.concatenate(preds, axis=0)
+
+
+
+
+
+
+
+
+
+
 import os
 import datetime
 from tqdm import tqdm
@@ -9,21 +261,32 @@ from torch.utils.data import DataLoader, TensorDataset
 
 
 from ncps.wirings import NCP
-from ncps.torch import CfC                   #  CfC replaces LTC
+from ncps.torch import CfC
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# [CNN新增] 超参数说明
+# 超参数说明
 #
-# CNN_CHANNELS : CNN 中间层通道数，控制提取的局部特征维度
-# CNN_OUT_CH   : CNN 输出通道数，同时也是 CfC 的 input_size
-#                原来 CfC input_size=12（原始导联数），现在变为 CNN_OUT_CH
-# CNN_T_OUT    : CNN 压缩后的时间步数（原始 T=1000 → CNN_T_OUT=50）
-#                计算方式：1000 // stride1 // stride2 = 1000 // 4 // 5 = 50
+# STFT 参数：
+#   N_FFT      : FFT 窗口大小，决定频率分辨率。64 → 33 个频率 bins
+#   HOP        : 帧移，决定时间分辨率。16 → 约 62 个时间帧（从 1000 步压缩而来）
+#   STFT_BINS  : 频率 bins 数 = N_FFT // 2 + 1 = 33
+#   STFT_CH    : CNN 第一层输入通道 = 12 导联 × 33 频率 bins = 396
+#
+# CNN 参数：
+#   CNN_CHANNELS : CNN 中间层通道数
+#   CNN_OUT_CH   : CNN 输出通道数，同时也是 CfC 的 input_size
+#
+# 注意：加入 STFT 后 CNN stride 改为 1×1
+#       因为 STFT 已将时间轴从 1000 压缩到 ~62，不需要 CNN 再做额外压缩
 # ──────────────────────────────────────────────────────────────────────────────
+N_FFT        = 64
+HOP          = 16
+STFT_BINS    = N_FFT // 2 + 1   # 33
+STFT_CH      = 12 * STFT_BINS   # 396
+
 CNN_CHANNELS = 32
 CNN_OUT_CH   = 64
-CNN_T_OUT    = 50    # 仅作注释说明用，实际由 stride 决定，不作为参数传入
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -31,47 +294,48 @@ CNN_T_OUT    = 50    # 仅作注释说明用，实际由 stride 决定，不作�
 # ──────────────────────────────────────────────────────────────────────────────
 
 class NCPNet(nn.Module):
-    """CNN + CfC-NCP model for multi-label ECG classification.
+    """STFT + CNN + CfC-NCP model for multi-label ECG classification.
 
-    数据流（加入 CNN 后）：
+    数据流：
         原始 ECG (B, T=1000, 12)
             │
-            ▼  [CNN新增] Conv1d 两层，并行处理，压缩时间轴
-        特征序列 (B, T=50, 64)
+            ▼  [STFT] 短时傅里叶变换，转为时频特征
+        频域特征 (B, 396, ~62)     ← 12导联 × 33频率bins，~62个时间帧
             │
-            ▼  [不变] CfC-NCP，在压缩后的序列上做时序建模
-        最后步输出 (B, motor_neurons)
+            ▼  [CNN] 两层卷积，提取局部时频模式（stride=1，不再压缩时间轴）
+        特征序列 (B, ~62, 64)
             │
-            ▼  [不变] 全连接分类头
+            ▼  [CfC-NCP] 时序建模 + 注意力池化
+        加权输出 (B, motor_neurons)
+            │
+            ▼  [FC] 全连接分类头
         分类 logits (B, n_classes)
     """
 
-    def __init__(self, n_classes: int, motor_neurons = 32, mixed_memory = False):
+    def __init__(self, n_classes: int, motor_neurons: int = 32, mixed_memory: bool = False):
         super(NCPNet, self).__init__()
 
-        # ── [CNN新增] 卷积前端：将原始 ECG 压缩为特征序列 ──────────────────
-        # Conv1d 期望输入格式：(B, channels, T)，与 RNN 的 (B, T, channels) 相反
-        # 因此在 forward() 中需要 permute 调换维度
-        #
-        # 第一层：kernel=5 覆盖约 50ms 的局部波形，stride=4 将 T 从 1000 压到 250
-        #         12导联原始信号 → 32维局部波形特征
-        # 第二层：继续压缩，T 从 250 → 50（每步约代表 200ms，约一个心跳节律单元）
-        #         32维 → 64维，进一步组合特征
-        # BatchNorm1d：稳定各通道的特征分布，加速收敛
-        # GELU：比 ReLU 更平滑，在序列模型中效果更好
+        # ── STFT 参数（无可学习参数，仅存储配置）──────────────────────────
+        self.n_fft = N_FFT
+        self.register_buffer("window", torch.hann_window(N_FFT))
+        self.hop   = HOP
+
+        # ── CNN 前端：接收 STFT 输出的时频特征 ────────────────────────────
+        # 输入通道从原来的 12（原始导联）改为 STFT_CH=396（12导联×33频率bins）
+        # stride 改为 1，因为 STFT 已经完成时间轴压缩（1000 → ~62）
         self.cnn = nn.Sequential(
-            nn.Conv1d(12, CNN_CHANNELS, kernel_size=5, stride=4, padding=2),
+            nn.Conv1d(STFT_CH,      CNN_CHANNELS, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_CHANNELS),
             nn.GELU(),
-            nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH, kernel_size=5, stride=5, padding=2),
+            nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH,   kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_OUT_CH),
             nn.GELU(),
         )
-        # ── [CNN新增] 结束 ──────────────────────────────────────────────────
 
+        # ── CfC-NCP 时序模型 ───────────────────────────────────────────────
         wiring = NCP(
-            inter_neurons=16,
-            command_neurons=8,
+            inter_neurons=32,
+            command_neurons=16,
             motor_neurons=motor_neurons,
             sensory_fanout=8,
             inter_fanout=4,
@@ -80,31 +344,54 @@ class NCPNet(nn.Module):
         )
 
         self.rnn = CfC(
-            # [CNN调整] input_size 从 12 改为 CNN_OUT_CH(=64)
-            # 原来直接接收 12 导联原始电压，现在接收 CNN 提取的 64 维特征
-            input_size=CNN_OUT_CH,
+            input_size=CNN_OUT_CH,       # 64，与 CNN 输出通道一致
             units=wiring,
             batch_first=True,
             mixed_memory=mixed_memory,
             return_sequences=True,
         )
 
-        self.fc = nn.Linear(self.rnn.output_size, n_classes)
+        # ── 分类头 + 注意力评分层 ──────────────────────────────────────────
+        self.fc      = nn.Linear(self.rnn.output_size, n_classes)
+        self.attn_fc = nn.Linear(self.rnn.output_size, 1)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         # x: (B, T=1000, 12)
 
-        # ── [CNN新增] 卷积前端处理 ─────────────────────────────────────────
-        # Conv1d 要求 (B, channels, T)，需先把时间轴和通道轴对调
-        x = x.permute(0, 2, 1)          # (B, 12, 1000)
-        x = self.cnn(x)                  # (B, 64, 50)
-        x = x.permute(0, 2, 1)          # (B, 50, 64)  ← 恢复为 RNN 期望的格式
-        # ── [CNN新增] 结束 ──────────────────────────────────────────────────
+        # ── STFT 预处理 ────────────────────────────────────────────────────
+        B, T, C = x.shape
 
-        # [不变] CfC-NCP 时序建模，现在只需处理 50 步而非 1000 步
-        out, _ = self.rnn(x)             # out: (B, 50, motor_neurons)
-        out = out[:, -1, :]              # 取最后一步 → (B, motor_neurons)
-        return self.fc(out)              # (B, n_classes)
+        # 将 12 导联分别展平，方便批量计算 STFT
+        x_flat = x.permute(0, 2, 1).reshape(B * C, T)    # (B*12, 1000)
+
+        stft = torch.stft(
+            x_flat,
+            n_fft=self.n_fft,
+            hop_length=self.hop,
+            window=self.window,
+            return_complex=True,
+        )                                                  # (B*12, 33, T')
+
+        mag     = stft.abs()                               # 取幅度谱，忽略相位
+        T_prime = mag.shape[-1]                            # ≈ 62
+
+        # 将 12 导联的频率特征拼接为单一通道维度，供 CNN 处理
+        mag = mag.reshape(B, C, STFT_BINS, T_prime)       # (B, 12, 33, T')
+        x   = mag.reshape(B, STFT_CH, T_prime)            # (B, 396, T')
+        # ── STFT 结束 ──────────────────────────────────────────────────────
+
+        # ── CNN 前端 ───────────────────────────────────────────────────────
+        x = self.cnn(x)             # (B, 64, T')
+        x = x.permute(0, 2, 1)     # (B, T', 64)  ← 恢复为 RNN 期望的格式
+        # ── CNN 结束 ───────────────────────────────────────────────────────
+
+        # ── CfC-NCP + 时间注意力池化 ───────────────────────────────────────
+        out, _ = self.rnn(x)                               # (B, T', motor_neurons)
+        attn   = torch.softmax(self.attn_fc(out), dim=1)  # (B, T', 1)
+        out    = (out * attn).sum(dim=1)                   # (B, motor_neurons)
+        # ── RNN 结束 ───────────────────────────────────────────────────────
+
+        return self.fc(out)                                # (B, n_classes)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -115,19 +402,19 @@ class NCPClassifier:
 
     def __init__(
         self,
-        motor_neurons = 32,
-        mixed_memory = False,
-        epochs = 50,
-        batch_size = 32,
-        lr = 0.002,
+        motor_neurons: int   = 32,
+        mixed_memory:  bool  = False,
+        epochs:        int   = 50,
+        batch_size:    int   = 32,
+        lr:            float = 0.002,
     ):
         self.motor_neurons = motor_neurons
-        self.mixed_memory = mixed_memory
-        self.epochs = epochs
-        self.batch_size = batch_size
-        self.lr = lr
-        self.model = None
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.mixed_memory  = mixed_memory
+        self.epochs        = epochs
+        self.batch_size    = batch_size
+        self.lr            = lr
+        self.model         = None
+        self.device        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     def fit(self, X_train, y_train, X_val, y_val):
         n_classes = y_train.shape[1]
@@ -137,22 +424,18 @@ class NCPClassifier:
             mixed_memory  = self.mixed_memory,
         ).to(self.device)
 
-        # [不变] Adam 优化器，参数包含 CNN 和 CfC-NCP 的所有权重
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
-
-        # [不变] 计算正负样本权重，解决多标签分类中的类别不平衡问题
-        pos_weight = (y_tr.shape[0] - y_tr.sum(dim=0)) / (y_tr.sum(dim=0) + 1e-6)
-        pos_weight = pos_weight.to(self.device)
-        criterion = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
-
 
         X_tr = torch.tensor(X_train, dtype=torch.float32)
         y_tr = torch.tensor(y_train, dtype=torch.float32)
         X_vl = torch.tensor(X_val,   dtype=torch.float32).to(self.device)
         y_vl = torch.tensor(y_val,   dtype=torch.float32).to(self.device)
 
-        # num_workers=0：避免 CUDA 初始化后 fork 子进程导致死锁
-        # pin_memory：仅在 CUDA 可用时开启，加速 CPU→GPU 数据传输
+        # 类别不平衡权重
+        pos_weight = (y_tr.shape[0] - y_tr.sum(dim=0)) / (y_tr.sum(dim=0) + 1e-6)
+        pos_weight = torch.clamp(pos_weight, max=10.0).to(self.device)
+        criterion  = nn.BCEWithLogitsLoss(pos_weight=pos_weight)
+
         loader = DataLoader(
             TensorDataset(X_tr, y_tr),
             batch_size  = self.batch_size,
@@ -161,7 +444,7 @@ class NCPClassifier:
             pin_memory  = torch.cuda.is_available(),
         )
 
-        # for 1cycle learning rate
+        # OneCycleLR：先升后降，帮助模型跳出局部最优
         scheduler = torch.optim.lr_scheduler.OneCycleLR(
             optimizer,
             max_lr          = self.lr,
@@ -185,7 +468,7 @@ class NCPClassifier:
                 loss = criterion(self.model(xb), yb)
                 loss.backward()
                 optimizer.step()
-                scheduler.step() # 1cycle learning rate update
+                scheduler.step()
                 epoch_loss += loss.item()
 
             self.model.eval()
@@ -193,7 +476,7 @@ class NCPClassifier:
                 val_loss = criterion(self.model(X_vl), y_vl).item()
 
             pbar.set_postfix({
-                "train": f"{epoch_loss/len(loader):.4f}",
+                "train": f"{epoch_loss / len(loader):.4f}",
                 "val":   f"{val_loss:.4f}",
                 "best":  f"{best_val_loss:.4f}",
             })
@@ -201,33 +484,33 @@ class NCPClassifier:
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_state    = {k: v.cpu().clone()
-                                for k, v in self.model.state_dict().items()}
+                                 for k, v in self.model.state_dict().items()}
                 no_improve    = 0
             else:
                 no_improve += 1
                 if no_improve >= patience:
-                    pbar.write(f"Early stopping at epoch {epoch+1}")
+                    pbar.write(f"Early stopping at epoch {epoch + 1}")
                     break
 
         pbar.close()
         self.model.load_state_dict(best_state)
         print(f"Best val_loss = {best_val_loss:.4f}")
 
-        # preserve the best model state
+        # 保存最优模型
         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
         os.makedirs(save_dir, exist_ok=True)
-        ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"cfc_ncp_{ts}.pt"
+        ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"cfc_ncp_stft_{ts}.pt"
         torch.save(best_state, os.path.join(save_dir, filename))
         print(f"Model saved to {save_dir}/{filename}")
 
     def predict(self, X):
         self.model.eval()
-        X_t = torch.tensor(X, dtype=torch.float32)
+        X_t   = torch.tensor(X, dtype=torch.float32)
         preds = []
         with torch.no_grad():
             for i in range(0, len(X_t), self.batch_size):
-                xb = X_t[i : i + self.batch_size].to(self.device)
+                xb    = X_t[i : i + self.batch_size].to(self.device)
                 probs = torch.sigmoid(self.model(xb))
                 preds.append(probs.cpu().numpy())
         return np.concatenate(preds, axis=0)
