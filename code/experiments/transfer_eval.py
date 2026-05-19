@@ -197,16 +197,16 @@ if __name__ == "__main__":
                                  motor_neurons=64, mixed_memory=True)
         results["cfc_ncp"] = compute_auc(y_true, y_pred, "cfc_ncp")
 
-    # ── LTC-NCP ──
-    ltc_files = sorted(glob.glob(f"{SAVED}/ltc_ncp_*.pt"))
-    ltc_pt = ltc_files[-1] if ltc_files else None
-    print(f"Using LTC weights: {ltc_pt}")
-    if os.path.exists(ltc_pt):
-        print(f"\nPredicting with ltc_ncp...")
-        from models.ltc_ncp_model import NCPNet
-        y_pred = predict_pytorch(NCPNet, ltc_pt, X,
-                                 motor_neurons=64, mixed_memory=True)
-        results["ltc_ncp"] = compute_auc(y_true, y_pred, "ltc_ncp")
+    # # ── LTC-NCP ──
+    # ltc_files = sorted(glob.glob(f"{SAVED}/ltc_ncp_*.pt"))
+    # ltc_pt = ltc_files[-1] if ltc_files else None
+    # print(f"Using LTC weights: {ltc_pt}")
+    # if os.path.exists(ltc_pt):
+    #     print(f"\nPredicting with ltc_ncp...")
+    #     from models.ltc_ncp_model import NCPNet
+    #     y_pred = predict_pytorch(NCPNet, ltc_pt, X,
+    #                              motor_neurons=64, mixed_memory=True)
+    #     results["ltc_ncp"] = compute_auc(y_true, y_pred, "ltc_ncp")
 
     # ── 汇总 ──
     print(f"\n{'='*55}")
