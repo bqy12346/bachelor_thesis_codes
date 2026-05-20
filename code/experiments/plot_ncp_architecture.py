@@ -122,11 +122,15 @@
 
 
 
-
-
 """
-plot_cfc_ncp_wiring.py  — 按连线类型分组着色版
-每对层（Sensory→Inter, Inter→Command, Command→Motor 等）独立控制线条数量和颜色
+plot_cfc_ncp_wiring.py  —  真实训练权重版（方案 B）
+直接从 CfC-NCP 的三层 wired cell 提取每条连接的真实权重 (ff1.weight * sparsity_mask)
+线条粗细 + 颜色深浅 = 该连接训练后权重的绝对值
+
+CfC-NCP 三层结构（已从权重 shape 解码确认）：
+  layer_0: [64 sensory + 32 inter(self)] -> 32 inter      ff1 (32, 96)
+  layer_1: [32 inter   + 16 cmd(self)]   -> 16 command    ff1 (16, 48)
+  layer_2: [16 command + 64 motor(self)] -> 64 motor      ff1 (64, 80)
 """
 import os
 import numpy as np
@@ -135,250 +139,179 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
-import matplotlib.colors as mcolors
 import matplotlib.lines as mlines
-from ncps.wirings import NCP
+import matplotlib.colors as mcolors
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ★ 修改这里 ★
 PT_FILE = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/code/saved_models/cfc_ncp_stft_20260519_114735.pt"
-TOP_K_PER_PAIR = 40      # 每对层之间最多显示的连线数
+TOP_K_PER_PAIR = 60      # 每对层最多显示的连线数（按权重取最大）
 # ══════════════════════════════════════════════════════════════════════════════
 
 OUT_FILE = os.path.join(os.path.dirname(os.path.abspath(PT_FILE)),
                         "cfc_ncp_wiring_weights.png")
 
-MOTOR_NEURONS = 64
-CNN_OUT_CH    = 64
-N_CLASSES     = 5
-INTER_N       = 32
-COMMAND_N     = 16
+SENSORY_N = 64
+INTER_N   = 32
+COMMAND_N = 16
+MOTOR_N   = 64
+N_CLASSES = 5
 
-# ── 1. 重建 wiring ────────────────────────────────────────────────────────────
-wiring = NCP(
-    inter_neurons=INTER_N,
-    command_neurons=COMMAND_N,
-    motor_neurons=MOTOR_NEURONS,
-    sensory_fanout=8,
-    inter_fanout=4,
-    recurrent_command_synapses=4,
-    motor_fanin=4,
-)
-wiring.build(CNN_OUT_CH)
-
-adj         = np.array(wiring.adjacency_matrix)
-sensory_adj = np.array(wiring.sensory_adjacency_matrix)
-total_n     = wiring.units
-SENSORY_N   = CNN_OUT_CH
-
-# 自动判断 sensory_adj 方向
-if sensory_adj.shape[0] == SENSORY_N:
-    def sens_connected(s, dst): return sensory_adj[s, dst] != 0
-else:
-    def sens_connected(s, dst): return sensory_adj[dst, s] != 0
-
-inter_idx   = list(range(0, INTER_N))
-command_idx = list(range(INTER_N, INTER_N + COMMAND_N))
-motor_idx   = list(range(INTER_N + COMMAND_N, total_n))
-
-print(f"adj shape         : {adj.shape}")
-print(f"sensory_adj shape : {sensory_adj.shape}")
-
-# ── 2. 提取神经元重要性 ───────────────────────────────────────────────────────
+# ── 1. 加载权重，提取每层有效连接矩阵 ────────────────────────────────────────
 state = torch.load(PT_FILE, map_location="cpu")
 
-motor_importance = np.ones(MOTOR_NEURONS)
-if "fc.weight" in state:
-    w = state["fc.weight"].numpy()
-    motor_importance = np.linalg.norm(w, axis=0)
-    motor_importance /= motor_importance.max() + 1e-8
+def eff_weight(li):
+    """该层有效权重 = ff1.weight * sparsity_mask，返回绝对值矩阵 (out, in)"""
+    ff1  = state[f"rnn.rnn_cell.layer_{li}.ff1.weight"].numpy()
+    mask = state[f"rnn.rnn_cell.layer_{li}.sparsity_mask"].numpy()
+    return np.abs(ff1 * mask)
 
-hidden_importance = np.ones(total_n)
-for k in state.keys():
-    if "output_map.weight" in k or "output_w" in k:
-        w = state[k].numpy()
-        hidden_importance = np.linalg.norm(w, axis=1)
-        hidden_importance /= hidden_importance.max() + 1e-8
-        print(f"Hidden importance ← {k}")
-        break
-else:
-    print("output_map.weight not found → uniform")
+W0 = eff_weight(0)   # (32, 96)  -> inter，   输入 [0:64]=sensory, [64:96]=inter(self)
+W1 = eff_weight(1)   # (16, 48)  -> command, 输入 [0:32]=inter,   [32:48]=command(self)
+W2 = eff_weight(2)   # (64, 80)  -> motor,   输入 [0:16]=command, [16:80]=motor(self)
 
-hidden_importance[motor_idx] = motor_importance
-sensory_importance = np.ones(SENSORY_N)
+# 全局归一化，所有连线用同一把尺子
+gmax = max(W0.max(), W1.max(), W2.max()) + 1e-9
 
-# ── 3. 坐标 ───────────────────────────────────────────────────────────────────
+# 各层连接：(src_local, dst_local, weight_normalized)
+# S→I : W0[:, 0:64]   (dst=inter 32, src=sensory 64)
+SI = [(s, d, W0[d, s] / gmax)
+      for d in range(INTER_N) for s in range(SENSORY_N)
+      if W0[d, s] > 0]
+# I→C : W1[:, 0:32]   (dst=command 16, src=inter 32)
+IC = [(s, d, W1[d, s] / gmax)
+      for d in range(COMMAND_N) for s in range(INTER_N)
+      if W1[d, s] > 0]
+# C→M : W2[:, 0:16]   (dst=motor 64, src=command 16)
+CM = [(s, d, W2[d, s] / gmax)
+      for d in range(MOTOR_N) for s in range(COMMAND_N)
+      if W2[d, s] > 0]
+# C→C : W1[:, 32:48]  command 自递归 (dst=command 16, src=command 16)
+CC = [(s, d, W1[d, 32 + s] / gmax)
+      for d in range(COMMAND_N) for s in range(COMMAND_N)
+      if W1[d, 32 + s] > 0]
+
+print(f"S->I edges: {len(SI)}")
+print(f"I->C edges: {len(IC)}")
+print(f"C->C edges: {len(CC)}")
+print(f"C->M edges: {len(CM)}")
+
+# 节点重要性（用于节点颜色深浅）= 每个节点所有出入连接权重之和
+def node_imp(n, edges_in, edges_out):
+    imp = np.zeros(n)
+    for (s, d, w) in edges_in:
+        imp[d] += w
+    for (s, d, w) in edges_out:
+        imp[s] += w
+    return imp / (imp.max() + 1e-9)
+
+imp_sensory = node_imp(SENSORY_N, [], SI)
+imp_inter   = node_imp(INTER_N,   SI, IC)
+imp_command = node_imp(COMMAND_N, IC + CC, CM + CC)
+# motor 重要性用 fc.weight（直接衡量对分类输出的贡献）
+fc_w = state["fc.weight"].numpy()                 # (5, 64)
+imp_motor = np.linalg.norm(fc_w, axis=0)
+imp_motor /= imp_motor.max() + 1e-9
+
+# ── 2. 坐标 ───────────────────────────────────────────────────────────────────
 LAYER_X = [0.10, 0.35, 0.62, 0.87]
 
 def make_pos(n, x):
     return np.array([(x, y) for y in np.linspace(0.94, 0.06, n)])
 
-pos_s = make_pos(SENSORY_N,     LAYER_X[0])
-pos_i = make_pos(INTER_N,       LAYER_X[1])
-pos_c = make_pos(COMMAND_N,     LAYER_X[2])
-pos_m = make_pos(MOTOR_NEURONS, LAYER_X[3])
+pos_s = make_pos(SENSORY_N, LAYER_X[0])
+pos_i = make_pos(INTER_N,   LAYER_X[1])
+pos_c = make_pos(COMMAND_N, LAYER_X[2])
+pos_m = make_pos(MOTOR_N,   LAYER_X[3])
 
-def hid_xy(idx):
-    if idx < INTER_N:
-        return pos_i[idx]
-    elif idx < INTER_N + COMMAND_N:
-        return pos_c[idx - INTER_N]
-    else:
-        return pos_m[idx - INTER_N - COMMAND_N]
-
-# ── 4. 按层对收集连线 ─────────────────────────────────────────────────────────
-# 每条边 = (p_src, p_dst, weight)
-pairs = {
-    "S→I":  [],   # Sensory  → Inter
-    "S→C":  [],   # Sensory  → Command
-    "S→M":  [],   # Sensory  → Motor (理论上没有，但如果 wiring 定义了就画出来)
-    "I→C":  [],   # Inter    → Command
-    "I→M":  [],   # Inter    → Motor
-    "C→M":  [],   # Command  → Motor
-    "C→C":  [],   # Command  → Command (recurrent)
-}
-
-# sensory 连线
-for dst in range(total_n):
-    for s in range(SENSORY_N):
-        if sens_connected(s, dst):
-            w = (hidden_importance[dst] + sensory_importance[s]) / 2
-            if dst < INTER_N:
-                pairs["S→I"].append((pos_s[s], pos_i[dst], w))
-            elif dst < INTER_N + COMMAND_N:
-                pairs["S→C"].append((pos_s[s], pos_c[dst - INTER_N], w))
-            else:
-                pairs["S→M"].append((pos_s[s], pos_m[dst - INTER_N - COMMAND_N], w))
-# hidden→hidden 连线
-for dst in range(total_n):
-    for src in range(total_n):
-        if adj[dst, src] == 0:
-            continue
-        w = (hidden_importance[src] + hidden_importance[dst]) / 2
-        p0 = hid_xy(src)
-        p1 = hid_xy(dst)
-        if src < INTER_N and INTER_N <= dst < INTER_N + COMMAND_N:
-            pairs["I→C"].append((p0, p1, w))
-        elif src < INTER_N and dst >= INTER_N + COMMAND_N:
-            pairs["I→M"].append((p0, p1, w))
-        elif INTER_N <= src < INTER_N + COMMAND_N and dst >= INTER_N + COMMAND_N:
-            pairs["C→M"].append((p0, p1, w))
-        elif INTER_N <= src < INTER_N + COMMAND_N and INTER_N <= dst < INTER_N + COMMAND_N:
-            pairs["C→C"].append((p0, p1, w))
-
-for k, v in pairs.items():
-    print(f"  {k}: {len(v)} edges")
-
-# ── 5. 每对层的颜色定义 ───────────────────────────────────────────────────────
-# 颜色 = 目标层的颜色（深色），来源层的颜色（浅色）混合
-PAIR_COLORS = {
-    "S→I": "#E65100",   # 橙（inter 色）
-    "S→C": "#00838F",   # 青（command 色）
-    "S→M": "#AB47BC",   # 绿（motor 色）
-    "I→C": "#00ACC1",   # 浅青
-    "I→M": "#66BB6A",   # 浅绿
-    "C→M": "#2E7D32",   # 深绿（command→motor，最重要）
-    "C→C": "#006064",   # 深青（循环连接，虚线）
-}
-PAIR_DASHED = {"C→C"}   # 循环连接用虚线
-
-# ── 6. 绘图 ───────────────────────────────────────────────────────────────────
-fig = plt.figure(figsize=(20, 9))
-fig.patch.set_facecolor("#F8F8F8")
-
-ax1 = fig.add_subplot(1, 2, 1)
-ax1.set_facecolor("#F8F8F8")
-ax1.axis("off")
-ax1.set_xlim(0, 1)
-ax1.set_ylim(0, 1)
-ax1.set_title(
-    f"CfC-NCP Wiring  (weight-based, layer layout)\n"
-    f"Sensory={SENSORY_N}  Inter={INTER_N}  Command={COMMAND_N}  Motor={MOTOR_NEURONS}",
-    fontsize=11, pad=10,
-)
-
-def draw_group(ax, edges, color, top_k, dashed=False):
-    if not edges:
-        return
-    # 按权重排序取 Top-K
-    top = sorted(edges, key=lambda e: e[2], reverse=True)[:top_k]
-    ls = "--" if dashed else "-"
-    for (p0, p1, w) in top:
-        w = float(np.clip(w, 0, 1))
-        ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
-                color=color,
-                alpha=0.18 + 0.60 * w,
-                linewidth=0.3 + 1.8 * w,
-                linestyle=ls,
-                zorder=1)
-
-# 按从左到右的层对顺序画，先画远的再画近的，避免遮挡
-draw_order = ["S→I", "S→C", "S→M", "I→C", "I→M", "C→M", "C→C"]
-for key in draw_order:
-    draw_group(ax1, pairs[key], PAIR_COLORS[key],
-               TOP_K_PER_PAIR, dashed=(key in PAIR_DASHED))
-
-# 节点
+# ── 3. 绘图 ───────────────────────────────────────────────────────────────────
 COLORS_NODE = {
     "sensory": "#7B2D8B",
     "inter":   "#E65100",
     "command": "#00838F",
     "motor":   "#2E7D32",
 }
+PAIR_COLORS = {
+    "S→I": "#E65100",
+    "I→C": "#00838F",
+    "C→C": "#006064",
+    "C→M": "#2E7D32",
+}
+
+fig = plt.figure(figsize=(20, 9))
+fig.patch.set_facecolor("#F8F8F8")
+
+ax1 = fig.add_subplot(1, 2, 1)
+ax1.set_facecolor("#F8F8F8"); ax1.axis("off")
+ax1.set_xlim(0, 1); ax1.set_ylim(0, 1)
+ax1.set_title(
+    f"CfC-NCP Wiring  (trained weights)\n"
+    f"Sensory={SENSORY_N}  Inter={INTER_N}  Command={COMMAND_N}  Motor={MOTOR_N}",
+    fontsize=11, pad=10,
+)
+
+def draw_group(ax, edges, src_pos, dst_pos, color, top_k, dashed=False):
+    if not edges:
+        return
+    top = sorted(edges, key=lambda e: e[2], reverse=True)[:top_k]
+    ls  = "--" if dashed else "-"
+    for (si, di, w) in top:
+        p0, p1 = src_pos[si], dst_pos[di]
+        w = float(np.clip(w, 0, 1))
+        ax.plot([p0[0], p1[0]], [p0[1], p1[1]],
+                color=color, alpha=0.15 + 0.65 * w,
+                linewidth=0.3 + 2.2 * w, linestyle=ls, zorder=1)
+
+draw_group(ax1, SI, pos_s, pos_i, PAIR_COLORS["S→I"], TOP_K_PER_PAIR)
+draw_group(ax1, IC, pos_i, pos_c, PAIR_COLORS["I→C"], TOP_K_PER_PAIR)
+draw_group(ax1, CC, pos_c, pos_c, PAIR_COLORS["C→C"], TOP_K_PER_PAIR, dashed=True)
+draw_group(ax1, CM, pos_c, pos_m, PAIR_COLORS["C→M"], TOP_K_PER_PAIR)
 
 def draw_nodes(ax, pos_arr, imp_arr, color):
     n = len(pos_arr)
     r = max(0.005, min(0.016, 0.50 / n))
     cmap = mcolors.LinearSegmentedColormap.from_list("", ["#dddddd", color])
     for i, (px, py) in enumerate(pos_arr):
-        imp = float(np.clip(imp_arr[i], 0, 1)) if i < len(imp_arr) else 0.5
+        imp = float(np.clip(imp_arr[i], 0, 1))
         ax.add_patch(plt.Circle((px, py), r,
                                 color=cmap(0.3 + 0.7 * imp),
-                                zorder=3, linewidth=0.5, ec="white"))
+                                zorder=3, lw=0.5, ec="white"))
 
-draw_nodes(ax1, pos_s, sensory_importance,              COLORS_NODE["sensory"])
-draw_nodes(ax1, pos_i, hidden_importance[inter_idx],    COLORS_NODE["inter"])
-draw_nodes(ax1, pos_c, hidden_importance[command_idx],  COLORS_NODE["command"])
-draw_nodes(ax1, pos_m, motor_importance,                COLORS_NODE["motor"])
+draw_nodes(ax1, pos_s, imp_sensory, COLORS_NODE["sensory"])
+draw_nodes(ax1, pos_i, imp_inter,   COLORS_NODE["inter"])
+draw_nodes(ax1, pos_c, imp_command, COLORS_NODE["command"])
+draw_nodes(ax1, pos_m, imp_motor,   COLORS_NODE["motor"])
 
-# 层标签
 for name, lx, n in [("Sensory", LAYER_X[0], SENSORY_N),
                      ("Inter",   LAYER_X[1], INTER_N),
                      ("Command", LAYER_X[2], COMMAND_N),
-                     ("Motor",   LAYER_X[3], MOTOR_NEURONS)]:
-    ax1.text(lx, 0.98, name,      ha="center", va="center",
+                     ("Motor",   LAYER_X[3], MOTOR_N)]:
+    ax1.text(lx, 0.98, name,     ha="center", va="center",
              fontsize=10, fontweight="bold", color=COLORS_NODE[name.lower()])
-    ax1.text(lx, 0.02, f"({n})",  ha="center", va="center",
+    ax1.text(lx, 0.02, f"({n})", ha="center", va="center",
              fontsize=8, color=COLORS_NODE[name.lower()])
 
-# 数据流箭头
 for i in range(3):
     ax1.annotate("",
-        xy=(LAYER_X[i+1] - 0.025, 0.5),
-        xytext=(LAYER_X[i] + 0.025, 0.5),
+        xy=(LAYER_X[i+1]-0.025, 0.5), xytext=(LAYER_X[i]+0.025, 0.5),
         arrowprops=dict(arrowstyle="-|>", color="#90A4AE",
                         lw=1.0, mutation_scale=10), zorder=0)
 
-# 图例：连线类型
 line_handles = [
-    mlines.Line2D([], [], color=PAIR_COLORS[k],
-                  linewidth=1.5,
-                  linestyle="--" if k in PAIR_DASHED else "-",
-                  label=k)
-    for k in draw_order
-    if pairs[k]
+    mlines.Line2D([], [], color=PAIR_COLORS["S→I"], lw=1.8, label="S→I  Sensory→Inter"),
+    mlines.Line2D([], [], color=PAIR_COLORS["I→C"], lw=1.8, label="I→C  Inter→Command"),
+    mlines.Line2D([], [], color=PAIR_COLORS["C→C"], lw=1.8, ls="--", label="C→C  Command (recurrent)"),
+    mlines.Line2D([], [], color=PAIR_COLORS["C→M"], lw=1.8, label="C→M  Command→Motor"),
 ]
-
 ax1.legend(handles=line_handles, loc="upper right",
            fontsize=8, framealpha=0.85, title="Connection type")
 
-# 颜色条
 sm = plt.cm.ScalarMappable(
     cmap=mcolors.LinearSegmentedColormap.from_list("", ["#eeeeee", "#333333"]),
     norm=plt.Normalize(0, 1))
 sm.set_array([])
 cbar = fig.colorbar(sm, ax=ax1, fraction=0.025, pad=0.01, location="right")
-cbar.set_label("Relative weight magnitude", fontsize=8)
+cbar.set_label("Relative trained weight magnitude", fontsize=8)
 
 # ── 右图 ──────────────────────────────────────────────────────────────────────
 ax2 = fig.add_subplot(1, 2, 2)
@@ -392,22 +325,21 @@ blocks = [
     (1.5, 5.6, 7.0, 1.7, BCOL[2],
      "STFT Preprocessing\n"
      "torch.stft(n_fft=64, hop=16, hann_window)\n"
-     "12 leads × 33 freq bins → (B, 396, T'≈63)"),
+     "12 leads x 33 freq bins -> (B, 396, T'~63)"),
     (1.5, 3.7, 7.0, 1.4, BCOL[1],
-     "CNN Frontend\nConv1d(396→32, k=5, s=1)  +  BN  +  GELU\n"
-     "Conv1d(32→64,  k=5, s=1)  +  BN  +  GELU\n→ (B, T'≈63, 64)"),
+     "CNN Frontend\nConv1d(396->32, k=5, s=1) + BN + GELU\n"
+     "Conv1d(32->64,  k=5, s=1) + BN + GELU\n-> (B, T'~63, 64)"),
     (1.5, 1.9, 7.0, 1.4, BCOL[3],
-     f"CfC-NCP\nSensory=64  Inter={INTER_N}  Command={COMMAND_N}  Motor={MOTOR_NEURONS}\n"
-     f"Attention pooling → (B, {MOTOR_NEURONS})"),
+     f"CfC-NCP (3 wired layers)\nSensory=64 -> Inter={INTER_N} -> Command={COMMAND_N} -> Motor={MOTOR_N}\n"
+     f"Attention pooling -> (B, {MOTOR_N})"),
     (1.5, 0.8, 7.0, 0.7, BCOL[4],
-     f"FC Head:  Linear({MOTOR_NEURONS} → {N_CLASSES})  +  BCEWithLogitsLoss"),
+     f"FC Head:  Linear({MOTOR_N} -> {N_CLASSES})  +  BCEWithLogitsLoss"),
 ]
 for (x, y, w, h, color, label) in blocks:
     ax2.add_patch(mpatches.FancyBboxPatch((x, y), w, h,
-        boxstyle="round,pad=0.1", facecolor=color,
-        edgecolor="#607D8B", linewidth=1.5))
-    ax2.text(x+w/2, y+h/2, label,
-             ha="center", va="center", fontsize=8.5, fontfamily="monospace")
+        boxstyle="round,pad=0.1", facecolor=color, edgecolor="#607D8B", linewidth=1.5))
+    ax2.text(x+w/2, y+h/2, label, ha="center", va="center",
+             fontsize=8.5, fontfamily="monospace")
 
 for y_tail, y_head in [(7.8, 7.3), (5.6, 5.1), (3.7, 3.2), (1.9, 1.5)]:
     ax2.annotate("", xy=(5, y_head), xytext=(5, y_tail),
@@ -415,7 +347,6 @@ for y_tail, y_head in [(7.8, 7.3), (5.6, 5.1), (3.7, 3.2), (1.9, 1.5)]:
 
 plt.tight_layout()
 os.makedirs(os.path.dirname(OUT_FILE), exist_ok=True)
-plt.savefig(OUT_FILE, dpi=150, bbox_inches="tight",
-            facecolor=fig.get_facecolor())
+plt.savefig(OUT_FILE, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
 plt.close()
 print(f"\n[Saved] {OUT_FILE}")
