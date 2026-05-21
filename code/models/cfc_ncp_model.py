@@ -328,9 +328,11 @@ class NCPNet(nn.Module):
             nn.Conv1d(STFT_CH,      CNN_CHANNELS, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_CHANNELS),
             nn.GELU(),
+            nn.Dropout(0.4),  # [新增] Dropout 正则化，减少过拟合
             nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH,   kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_OUT_CH),
             nn.GELU(),
+            nn.Dropout(0.4),  # [新增] 第二层后也加 Dropout，进一步增强正则化
         )
 
         # ── CfC-NCP 时序模型 ───────────────────────────────────────────────
@@ -448,7 +450,7 @@ class NCPClassifier:
             mixed_memory  = self.mixed_memory,
         ).to(self.device)
 
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr, weight_decay=1e-4)
 
         X_tr = torch.tensor(X_train, dtype=torch.float32)
         y_tr = torch.tensor(y_train, dtype=torch.float32)
@@ -484,6 +486,8 @@ class NCPClassifier:
         pbar = tqdm(range(self.epochs), desc="CfC-NCP", unit="epoch", dynamic_ncols=True)
 
         y_val_np = y_vl.cpu().numpy()
+
+        best_val_auc = -1.0
 
         for epoch in pbar:
             self.model.train()
@@ -521,20 +525,28 @@ class NCPClassifier:
                 "best":  f"{best_val_loss:.4f}",
             })
 
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_state    = {k: v.cpu().clone()
-                                 for k, v in self.model.state_dict().items()}
-                no_improve    = 0
+            
+            if val_auc > best_val_auc:
+                best_val_auc = val_auc
+                best_state   = {k: v.cpu().clone() for k, v in self.model.state_dict().items()}
+                no_improve   = 0
             else:
                 no_improve += 1
-                if no_improve >= patience:
-                    pbar.write(f"Early stopping at epoch {epoch + 1}")
-                    break
+
+            # if val_loss < best_val_loss:
+            #     best_val_loss = val_loss
+            #     best_state    = {k: v.cpu().clone()
+            #                      for k, v in self.model.state_dict().items()}
+            #     no_improve    = 0
+            # else:
+            #     no_improve += 1
+            #     if no_improve >= patience:
+            #         pbar.write(f"Early stopping at epoch {epoch + 1}")
+            #         break
 
         pbar.close()
         self.model.load_state_dict(best_state)
-        print(f"Best val_loss = {best_val_loss:.4f}")
+        print(f"Best val_auc = {best_val_auc:.4f}")
 
         # 保存最优模型
         save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
