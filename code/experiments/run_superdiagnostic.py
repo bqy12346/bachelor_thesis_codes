@@ -251,14 +251,6 @@ DATAFOLDER   = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/data/ptbxl/"
 OUTPUTFOLDER = "./output/"
 
 models = [
-    {
-        "modelname": "fastai_xresnet1d101",
-        "modeltype": "FASTAI",
-        "parameters": {
-            "epochs": 50,
-            "lr":     0.01,
-        }
-    },
 
     {
         "modelname":  "cfc_ncp",
@@ -283,6 +275,15 @@ models = [
     #         "lr":            0.002,
     #     }
     # },
+    
+    {
+        "modelname": "fastai_xresnet1d101",
+        "modeltype": "FASTAI",
+        "parameters": {
+            "epochs": 50,
+            "lr":     0.01,
+        }
+    },
 
     {
         "modelname": "fastai_inception1d",

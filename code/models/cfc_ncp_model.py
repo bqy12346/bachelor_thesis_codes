@@ -507,7 +507,7 @@ class NCPClassifier:
                 val_loss = criterion(val_logits, y_vl).item()
                 val_probs = torch.sigmoid(val_logits).cpu().numpy()
 
-            val_auc = _macro_auc(y_vl_np, val_probs)
+            val_auc = _macro_auc(y_val_np, val_probs)
                         
             # ── [新增] 记录 epoch 级指标 ──
             self.history["train_loss"].append(mean_train_loss)
