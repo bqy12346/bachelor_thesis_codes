@@ -258,6 +258,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+from sklearn.metrics import roc_auc_score
 
 
 from ncps.wirings import NCP
@@ -395,6 +396,19 @@ class NCPNet(nn.Module):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# AUC helper
+# ──────────────────────────────────────────────────────────────────────────────
+def _macro_auc(y_true: np.ndarray, y_score: np.ndarray):
+    """安全计算 macro AUC，跳过只含单一类别的列"""
+    valid_cols = [i for i in range(y_true.shape[1])
+                  if len(np.unique(y_true[:, i])) > 1]
+    if not valid_cols:
+        return float("nan")
+    aucs = roc_auc_score(y_true[:, valid_cols], y_score[:, valid_cols], average=None)
+    return float(np.mean(aucs))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # fit() / predict() wrapper  (required by scp_experiment.py)
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -415,6 +429,16 @@ class NCPClassifier:
         self.lr            = lr
         self.model         = None
         self.device        = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+        # ── [新增] 训练历史，训练完后可用 plot_training_history() 画图 ──
+        self.history = {
+            "train_loss": [],   # 每个 epoch 一个值
+            "val_loss":   [],   # 每个 epoch 一个值
+            "val_auc":    [],   # 每个 epoch 一个值（macro AUC on validation set）
+            "lr_per_step":[],   # 每个 step 一个值，反映 OneCycle 曲线
+        }
+
 
     def fit(self, X_train, y_train, X_val, y_val):
         n_classes = y_train.shape[1]
@@ -459,6 +483,8 @@ class NCPClassifier:
 
         pbar = tqdm(range(self.epochs), desc="CfC-NCP", unit="epoch", dynamic_ncols=True)
 
+        y_val_np = y_vl.cpu().numpy()
+
         for epoch in pbar:
             self.model.train()
             epoch_loss = 0.0
@@ -470,14 +496,28 @@ class NCPClassifier:
                 optimizer.step()
                 scheduler.step()
                 epoch_loss += loss.item()
+                # ── [新增] 记录每个 step 的学习率 ──
+                self.history["lr_per_step"].append(optimizer.param_groups[0]["lr"])
+            
+            mean_train_loss = epoch_loss / len(loader)
 
             self.model.eval()
             with torch.no_grad():
-                val_loss = criterion(self.model(X_vl), y_vl).item()
+                val_logits = self.model(X_vl)
+                val_loss = criterion(val_logits, y_vl).item()
+                val_probs = torch.sigmoid(val_logits).cpu().numpy()
+
+            val_auc = _macro_auc(y_vl_np, val_probs)
+                        
+            # ── [新增] 记录 epoch 级指标 ──
+            self.history["train_loss"].append(mean_train_loss)
+            self.history["val_loss"].append(val_loss)
+            self.history["val_auc"].append(val_auc)
 
             pbar.set_postfix({
-                "train": f"{epoch_loss / len(loader):.4f}",
+                "train": f"{mean_train_loss:.4f}",
                 "val":   f"{val_loss:.4f}",
+                "valAUC": f"{val_auc:.4f}",
                 "best":  f"{best_val_loss:.4f}",
             })
 
@@ -503,6 +543,22 @@ class NCPClassifier:
         filename = f"cfc_ncp_stft_{ts}.pt"
         torch.save(best_state, os.path.join(save_dir, filename))
         print(f"Model saved to {save_dir}/{filename}")
+        
+        # ── [新增] 保存训练历史，供后续分析和曲线绘制 ──
+        history_path = os.path.join(save_dir, f"cfc_ncp_history_{ts}.npz")
+        np.savez(
+            history_path,
+            train_loss  = np.array(self.history["train_loss"]),
+            val_loss    = np.array(self.history["val_loss"]),
+            val_auc     = np.array(self.history["val_auc"]),
+            lr_per_step = np.array(self.history["lr_per_step"]),
+        )
+        print(f"History saved to {history_path}")
+ 
+        # ── [新增] 自动画训练曲线 ──
+        plot_path = os.path.join(save_dir, f"cfc_ncp_curves_{ts}.png")
+        plot_training_history(history_path, plot_path)
+        print(f"Curves saved to {plot_path}")
 
     def predict(self, X):
         self.model.eval()
@@ -514,3 +570,93 @@ class NCPClassifier:
                 probs = torch.sigmoid(self.model(xb))
                 preds.append(probs.cpu().numpy())
         return np.concatenate(preds, axis=0)
+    
+
+# ──────────────────────────────────────────────────────────────────────────────
+# [新增] 训练曲线绘制函数
+# ──────────────────────────────────────────────────────────────────────────────
+def plot_training_history(history_path: str, out_path: str = None):
+    """读取 .npz 历史文件并画 4 张子图：
+       (1) train/val loss
+       (2) val AUC
+       (3) lr per step (OneCycle 曲线)
+       (4) lr per epoch (各 epoch 的平均 lr，便于和 epoch 级指标对照)
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+ 
+    data = np.load(history_path)
+    train_loss = data["train_loss"]
+    val_loss   = data["val_loss"]
+    val_auc    = data["val_auc"]
+    lr_step    = data["lr_per_step"]
+ 
+    n_epochs        = len(train_loss)
+    steps_per_epoch = max(1, len(lr_step) // n_epochs)
+    epochs          = np.arange(1, n_epochs + 1)
+ 
+    # 每个 epoch 的 lr 取该 epoch 内的平均值
+    lr_epoch = np.array([
+        lr_step[i*steps_per_epoch : (i+1)*steps_per_epoch].mean()
+        for i in range(n_epochs)
+    ])
+ 
+    fig, axes = plt.subplots(1, 4, figsize=(22, 5))
+    fig.patch.set_facecolor("#F5F5F5")
+ 
+    PALETTE = {"train": "#1565C0", "val": "#E65100",
+               "auc":   "#2E7D32", "lr":  "#6A1B9A"}
+ 
+    # ── 子图1：Loss ──
+    ax = axes[0]
+    ax.plot(epochs, train_loss, color=PALETTE["train"], lw=2, label="Train loss", marker="o", markersize=3)
+    ax.plot(epochs, val_loss,   color=PALETTE["val"],   lw=2, label="Val loss",   marker="o", markersize=3)
+    ax.set_title("Loss Curves", fontsize=12, fontweight="bold", color="#212121")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("Loss")
+    ax.legend(frameon=True, framealpha=0.85)
+    ax.grid(True, linestyle="--", alpha=0.5)
+ 
+    # ── 子图2：Val AUC ──
+    ax = axes[1]
+    ax.plot(epochs, val_auc, color=PALETTE["auc"], lw=2, marker="o", markersize=3)
+    best_epoch = int(np.nanargmax(val_auc)) + 1
+    best_auc   = float(np.nanmax(val_auc))
+    ax.axvline(best_epoch, color="#9E9E9E", ls=":", lw=1)
+    ax.annotate(f"best epoch={best_epoch}\nAUC={best_auc:.4f}",
+                xy=(best_epoch, best_auc),
+                xytext=(8, -25), textcoords="offset points",
+                fontsize=9, color="#212121",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", ec="#BDBDBD"))
+    ax.set_title("Validation AUC (macro)", fontsize=12, fontweight="bold", color="#212121")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("AUC")
+    ax.grid(True, linestyle="--", alpha=0.5)
+ 
+    # ── 子图3：lr per step（OneCycle 完整曲线） ──
+    ax = axes[2]
+    ax.plot(np.arange(len(lr_step)), lr_step, color=PALETTE["lr"], lw=1.2)
+    ax.set_title("Learning Rate (per step)", fontsize=12, fontweight="bold", color="#212121")
+    ax.set_xlabel("Step"); ax.set_ylabel("lr")
+    ax.grid(True, linestyle="--", alpha=0.5)
+ 
+    # ── 子图4：lr per epoch（与 epoch 级指标对齐） ──
+    ax = axes[3]
+    ax.plot(epochs, lr_epoch, color=PALETTE["lr"], lw=2, marker="o", markersize=3)
+    ax.set_title("Learning Rate (per epoch avg)", fontsize=12, fontweight="bold", color="#212121")
+    ax.set_xlabel("Epoch"); ax.set_ylabel("lr")
+    ax.grid(True, linestyle="--", alpha=0.5)
+ 
+    for ax in axes:
+        ax.set_facecolor("#FAFAFA")
+        for s in ax.spines.values():
+            s.set_edgecolor("#BDBDBD"); s.set_linewidth(0.8)
+ 
+    fig.suptitle(f"CfC-NCP Training Curves  |  {os.path.basename(history_path)}",
+                 fontsize=13, fontweight="bold", y=1.02)
+    plt.tight_layout()
+ 
+    if out_path is None:
+        out_path = history_path.replace(".npz", "_curves.png")
+    plt.savefig(out_path, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+    plt.close()
+    return out_path
