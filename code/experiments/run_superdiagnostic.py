@@ -281,7 +281,7 @@ models = [
         "modeltype": "FASTAI",
         "parameters": {
             "epochs": 50,
-            "lr":     0.01,
+            "lr":     0.001,
         }
     },
 
@@ -290,7 +290,7 @@ models = [
         "modeltype": "FASTAI",
         "parameters": {
             "epochs": 50,
-            "lr":     0.01,
+            "lr":     0.001,
         }
     },
 
@@ -299,7 +299,7 @@ models = [
         "modeltype": "FASTAI",
         "parameters":{
             "epochs": 50,
-            "lr": 0.01,
+            "lr": 0.001,
         }
     },
 
@@ -308,7 +308,7 @@ models = [
         "modeltype": "FASTAI",
         "parameters":{
             "epochs": 50,
-            "lr": 0.01,
+            "lr": 0.001,
         }
     },
 
@@ -317,7 +317,7 @@ models = [
         "modeltype": "FASTAI",
         "parameters":{
             "epochs": 50,
-            "lr": 0.01,
+            "lr": 0.001,
         }
     },
 
