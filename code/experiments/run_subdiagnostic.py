@@ -112,8 +112,23 @@ def plot_comparison(records, plot_dir):
     val_aucs  = [float(r["val_auc"])  if r["val_auc"]  != "N/A" else 0 for r in all_rec]
     test_aucs = [float(r["test_auc"]) if r["test_auc"] != "N/A" else 0 for r in all_rec]
 
-    PALETTE = ["#1565C0", "#E65100", "#2E7D32",
-               "#6A1B9A", "#00838F", "#AD1457", "#4E342E", "#546E7A"]
+    # PALETTE = ["#1565C0", "#E65100", "#2E7D32",
+    #            "#6A1B9A", "#00838F", "#AD1457", "#4E342E", "#546E7A"]
+    MODEL_COLORS = {
+        "cfc_ncp":              "#1565C0",
+        "ltc_ncp":              "#0D47A1",
+        "fastai_xresnet1d101":  "#E65100",
+        "fastai_inception1d":   "#EF6C00",
+        "fastai_resnet1d_wang": "#FF8F00",
+        "fastai_lstm":          "#2E7D32",
+        "fastai_gru":           "#558B2F",
+        "wavelet_rf":           "#6A1B9A",
+        "ctrnn":                "#00838F",
+        "node":                 "#00695C",
+        "ctgru":                "#26A69A",
+        "ensemble":             "#37474F",
+    }
+    DEFAULT_COLOR = "#9E9E9E"
 
     fig, axes = plt.subplots(1, 5, figsize=(27, 5.5))
     fig.patch.set_facecolor("#F5F5F5")
@@ -124,9 +139,8 @@ def plot_comparison(records, plot_dir):
             spine.set_linewidth(0.8)
 
     def bar_chart(ax, names, values, title, ylabel,
-                  color_offset=0, fmt=".1f", ylim=None):
-        colors = [PALETTE[(i + color_offset) % len(PALETTE)]
-                  for i in range(len(names))]
+                  fmt=".1f", ylim=None):
+        colors = [MODEL_COLORS.get(name, DEFAULT_COLOR) for name in names]
         bars = ax.bar(names, values, color=colors, width=0.5,
                       edgecolor="white", linewidth=1.5, zorder=3)
         ax.set_title(title, fontsize=12, fontweight="bold",
@@ -146,25 +160,25 @@ def plot_comparison(records, plot_dir):
 
     # 子图1：训练时长（秒）
     bar_chart(axes[0], names_ne, times,
-              "Training Time (s)", "Seconds", color_offset=0, fmt=".1f")
+              "Training Time (s)", "Seconds", fmt=".1f")
 
     # 子图2: 参数量（只统计有参数数据的模型）
     non_ens_params = [r for r in non_ens if r["total_params"] != "N/A"]
     names_params   = [r["model"] for r in non_ens_params]
     params_vals    = [int(r["total_params"]) for r in non_ens_params]
-    bar_chart(axes[1], names_params, params_vals, "Total Parameters", "Parameters", color_offset=1, fmt=".0f")
+    bar_chart(axes[1], names_params, params_vals, "Total Parameters", "Parameters", fmt=".0f")
    
     # 子图3：Val AUC
     auc_min = max(0.0, min(v for v in val_aucs if v > 0) - 0.06) if any(val_aucs) else 0
     bar_chart(axes[2], names_all, val_aucs,
               "Validation AUC (macro)", "AUC",
-              color_offset=2, fmt=".4f", ylim=(auc_min, 1.0))
+              fmt=".4f", ylim=(auc_min, 1.0))
 
     # 子图4：Test AUC
     auc_min2 = max(0.0, min(v for v in test_aucs if v > 0) - 0.06) if any(test_aucs) else 0
     bar_chart(axes[3], names_all, test_aucs,
               "Test AUC (macro)", "AUC",
-              color_offset=4, fmt=".4f", ylim=(auc_min2, 1.0))
+              fmt=".4f", ylim=(auc_min2, 1.0))
     
     # 子图5：Test Recall
     recall_rec = [r for r in all_rec if r.get("test_recall", "N/A") != "N/A"]
@@ -173,7 +187,7 @@ def plot_comparison(records, plot_dir):
     recall_min    = max(0.0, min(recall_vals) - 0.06) if recall_vals else 0
     bar_chart(axes[4], names_recall, recall_vals,
           "Test Recall (macro)", "Recall",
-          color_offset=5, fmt=".4f", ylim=(recall_min, 1.0))
+          fmt=".4f", ylim=(recall_min, 1.0))
 
     fig.suptitle(f"Model Comparison  |  {timestamp}",
                  fontsize=13, fontweight="bold", color="#212121", y=1.02)
@@ -362,7 +376,7 @@ def patched_perform(self):
 
         if modeltype == "CFC_NCP":
             from models.cfc_ncp_model import NCPClassifier
-            raw_model = NCPClassifier(**modelparams)
+            raw_model = NCPClassifier(**modelparams, task=self.task)
         elif modeltype == "LTC_NCP":
             from models.ltc_ncp_model import NCPClassifier
             raw_model = NCPClassifier(**modelparams)

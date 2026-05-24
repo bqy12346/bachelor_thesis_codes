@@ -289,6 +289,28 @@ STFT_CH      = 12 * STFT_BINS   # 396
 CNN_CHANNELS = 32
 CNN_OUT_CH   = 64
 
+MASK_RATIO = 0.2     # 每次掩盖 20% 的时间片段
+MASK_PROB  = 0.8     # 80% 的训练 batch 应用掩码
+
+def random_mask(x: torch.Tensor,
+                mask_ratio: float = MASK_RATIO,
+                prob: float = MASK_PROB) -> torch.Tensor:
+    """随机掩码数据增强，仅在训练时调用。
+    x: (B, T, C) ECG 信号
+    """
+    if torch.rand(1).item() > prob:
+        return x
+
+    B, T, C = x.shape
+    n_mask = max(1, int(T * mask_ratio))
+    starts = torch.randint(0, T - n_mask + 1, (B,), device=x.device)
+
+    mask = torch.ones_like(x)
+    for b in range(B):
+        s = int(starts[b].item())
+        mask[b, s : s + n_mask, :] = 0.0
+    return x * mask
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Neural network
@@ -328,11 +350,11 @@ class NCPNet(nn.Module):
             nn.Conv1d(STFT_CH,      CNN_CHANNELS, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_CHANNELS),
             nn.GELU(),
-            nn.Dropout(0.4),  # [新增] Dropout 正则化，减少过拟合
+            nn.Dropout(0.3),  # [新增] Dropout 正则化，减少过拟合
             nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH,   kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_OUT_CH),
             nn.GELU(),
-            nn.Dropout(0.4),  # [新增] 第二层后也加 Dropout，进一步增强正则化
+            nn.Dropout(0.3),  # [新增] 第二层后也加 Dropout，进一步增强正则化
         )
 
         # ── CfC-NCP 时序模型 ───────────────────────────────────────────────
@@ -423,7 +445,9 @@ class NCPClassifier:
         epochs:        int   = 50,
         batch_size:    int   = 32,
         lr:            float = 0.002,
+        task:          str   = "",      # add special folder to each task
     ):
+        self.task = task    # add special folder to each task
         self.motor_neurons = motor_neurons
         self.mixed_memory  = mixed_memory
         self.epochs        = epochs
@@ -494,6 +518,7 @@ class NCPClassifier:
             epoch_loss = 0.0
             for xb, yb in loader:
                 xb, yb = xb.to(self.device), yb.to(self.device)
+                xb = random_mask(xb) # [新增] 训练时随机掩码数据增强
                 optimizer.zero_grad()
                 loss = criterion(self.model(xb), yb)
                 loss.backward()
@@ -522,7 +547,7 @@ class NCPClassifier:
                 "train": f"{mean_train_loss:.4f}",
                 "val":   f"{val_loss:.4f}",
                 "valAUC": f"{val_auc:.4f}",
-                "best":  f"{best_val_loss:.4f}",
+                "bestAUC":  f"{best_val_auc:.4f}",
             })
 
             
@@ -549,7 +574,7 @@ class NCPClassifier:
         print(f"Best val_auc = {best_val_auc:.4f}")
 
         # 保存最优模型
-        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
+        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models", self.task)
         os.makedirs(save_dir, exist_ok=True)
         ts       = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"cfc_ncp_stft_{ts}.pt"

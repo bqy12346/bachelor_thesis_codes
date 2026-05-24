@@ -256,7 +256,7 @@ models = [
         "modelname":  "cfc_ncp",
         "modeltype":  "CFC_NCP",
         "parameters": {
-            "motor_neurons": 64,
+            "motor_neurons": 128,
             "mixed_memory":  True,
             "epochs":        50,
             "batch_size":    256,
@@ -374,7 +374,7 @@ def patched_perform(self):
 
         if modeltype == "CFC_NCP":
             from models.cfc_ncp_model import NCPClassifier
-            raw_model = NCPClassifier(**modelparams)
+            raw_model = NCPClassifier(**modelparams, task=self.task)
         elif modeltype == "LTC_NCP":
             from models.ltc_ncp_model import NCPClassifier
             raw_model = NCPClassifier(**modelparams)
