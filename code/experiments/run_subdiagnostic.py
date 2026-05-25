@@ -254,6 +254,19 @@ DATAFOLDER   = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/data/ptbxl/"
 OUTPUTFOLDER = "./output/"
 
 models = [
+    
+    {
+        "modelname":  "cfc_ncp",
+        "modeltype":  "CFC_NCP",
+        "parameters": {
+            "motor_neurons": 128, #default=64
+            "mixed_memory":  True,
+            "epochs":        60,
+            "batch_size":    128,
+            "lr":            0.002,
+        }
+    },
+    
     {
         "modelname": "fastai_xresnet1d101",
         "modeltype": "FASTAI",
@@ -263,17 +276,7 @@ models = [
         }
     },
 
-    {
-        "modelname":  "cfc_ncp",
-        "modeltype":  "CFC_NCP",
-        "parameters": {
-            "motor_neurons": 128, #default=64
-            "mixed_memory":  True,
-            "epochs":        50,
-            "batch_size":    256,
-            "lr":            0.002,
-        }
-    },
+    
 
     # {
     #     "modelname": "ltc_ncp",

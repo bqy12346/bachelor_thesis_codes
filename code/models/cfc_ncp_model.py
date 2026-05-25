@@ -289,7 +289,7 @@ STFT_CH      = 12 * STFT_BINS   # 396
 CNN_CHANNELS = 32
 CNN_OUT_CH   = 64
 
-MASK_RATIO = 0.2     # 每次掩盖 20% 的时间片段
+MASK_RATIO = 0.25     # 每次掩盖 25% 的时间片段
 MASK_PROB  = 0.8     # 80% 的训练 batch 应用掩码
 
 def random_mask(x: torch.Tensor,
@@ -350,11 +350,11 @@ class NCPNet(nn.Module):
             nn.Conv1d(STFT_CH,      CNN_CHANNELS, kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_CHANNELS),
             nn.GELU(),
-            nn.Dropout(0.3),  # [新增] Dropout 正则化，减少过拟合
+            nn.Dropout(0.4),  # [新增] Dropout 正则化，减少过拟合
             nn.Conv1d(CNN_CHANNELS, CNN_OUT_CH,   kernel_size=5, stride=1, padding=2),
             nn.BatchNorm1d(CNN_OUT_CH),
             nn.GELU(),
-            nn.Dropout(0.3),  # [新增] 第二层后也加 Dropout，进一步增强正则化
+            nn.Dropout(0.4),  # [新增] 第二层后也加 Dropout，进一步增强正则化
         )
 
         # ── CfC-NCP 时序模型 ───────────────────────────────────────────────
