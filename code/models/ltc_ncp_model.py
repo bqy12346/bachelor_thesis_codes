@@ -69,7 +69,9 @@ class NCPClassifier:
         epochs = 50,
         batch_size = 32,
         lr = 0.002,
+        task = "",
     ):
+        self.task = task
         self.motor_neurons = motor_neurons
         self.mixed_memory = mixed_memory
         self.epochs = epochs
@@ -135,7 +137,12 @@ class NCPClassifier:
         print(f"Done. Best val_loss={best_val_loss:.4f}")
 
         # preserve the best model state
-        save_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../saved_models")
+        save_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), 
+            "../saved_models",
+            self.task
+        )
+        
         os.makedirs(save_dir, exist_ok=True)
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"ltc_ncp_{ts}.pt"

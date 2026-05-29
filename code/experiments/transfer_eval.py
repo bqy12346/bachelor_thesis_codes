@@ -188,13 +188,15 @@ if __name__ == "__main__":
 
     # ── CfC-NCP ──
     cfc_files = sorted(glob.glob(f"{SAVED}/cfc_ncp_stft_*.pt"))
+
+
     cfc_pt = cfc_files[-1] if cfc_files else None
     print(f"Using CfC weights: {cfc_pt}")
     if os.path.exists(cfc_pt):
         print(f"\nPredicting with cfc_ncp...")
         from models.cfc_ncp_model import NCPNet
         y_pred = predict_pytorch(NCPNet, cfc_pt, X,
-                                 motor_neurons=64, mixed_memory=True)
+                                 motor_neurons=128, mixed_memory=True)
         results["cfc_ncp"] = compute_auc(y_true, y_pred, "cfc_ncp")
 
     # # ── LTC-NCP ──

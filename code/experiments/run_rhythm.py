@@ -253,14 +253,7 @@ DATAFOLDER   = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/data/ptbxl/"
 OUTPUTFOLDER = "./output/"
 
 models = [
-    {
-        "modelname": "fastai_xresnet1d101",
-        "modeltype": "FASTAI",
-        "parameters": {
-            "epochs": 50,
-            "lr":     0.001,
-        }
-    },
+    
 
     {
         "modelname":  "cfc_ncp",
@@ -274,17 +267,61 @@ models = [
         }
     },
 
-    # {
-    #     "modelname": "ltc_ncp",
-    #     "modeltype": "LTC_NCP",
-    #     "parameters": {
-    #         "motor_neurons": 64,
-    #         "mixed_memory":  True,
-    #         "epochs":        50,
-    #         "batch_size":    32,
-    #         "lr":            0.002,
-    #     }
-    # },
+    {
+        "modelname": "cfc_ncp_no_stft",
+        "modeltype": "CFC_NCP_NO_STFT",
+        "parameters": {
+            "motor_neurons": 128,
+            "mixed_memory":  True,
+            "epochs":        50,
+            "batch_size":    256,
+            "lr":            0.002,
+        }
+    },
+
+    {
+        "modelname": "cfc_ncp_no_attn",
+        "modeltype": "CFC_NCP_NO_ATTN",
+        "parameters": {
+            "motor_neurons": 128,
+            "mixed_memory":  True,
+            "epochs":        50,
+            "batch_size":    256,
+            "lr":            0.002,
+        }
+    },
+    {
+        "modelname": "cfc_ncp_no_mask",
+        "modeltype": "CFC_NCP_NO_MASK",
+        "parameters": {
+            "motor_neurons": 128,
+            "mixed_memory":  True,
+            "epochs":        50,
+            "batch_size":    256,
+            "lr":            0.002,
+        }
+    },
+
+    {
+        "modelname": "ltc_ncp",
+        "modeltype": "LTC_NCP",
+        "parameters": {
+            "motor_neurons": 128,
+            "mixed_memory":  True,
+            "epochs":        50,
+            "batch_size":    32,
+            "lr":            0.002,
+        }
+    },
+
+    {
+        "modelname": "fastai_xresnet1d101",
+        "modeltype": "FASTAI",
+        "parameters": {
+            "epochs": 50,
+            "lr":     0.001,
+        }
+    },
 
     {
         "modelname": "fastai_inception1d",
@@ -375,6 +412,15 @@ def patched_perform(self):
 
         if modeltype == "CFC_NCP":
             from models.cfc_ncp_model import NCPClassifier
+            raw_model = NCPClassifier(**modelparams, task=self.task)
+        elif modeltype == "CFC_NCP_NO_STFT":
+            from models.cfc_ncp_no_stft_model import NCPClassifier
+            raw_model = NCPClassifier(**modelparams, task=self.task)
+        elif modeltype == "CFC_NCP_NO_ATTN":
+            from models.cfc_ncp_no_attn_model import NCPClassifier
+            raw_model = NCPClassifier(**modelparams, task=self.task)
+        elif modeltype == "CFC_NCP_NO_MASK":
+            from models.cfc_ncp_no_mask_model import NCPClassifier
             raw_model = NCPClassifier(**modelparams, task=self.task)
         elif modeltype == "LTC_NCP":
             from models.ltc_ncp_model import NCPClassifier
