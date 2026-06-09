@@ -145,6 +145,21 @@ def compute_auc(y_true, y_pred, model_name):
         print(f"    {CLASS_ORDER[idx]:<6}: {auc_per[i]:.4f}")
     return macro
 
+# ── Recall计算 ──────────────────────────────────────
+def compute_recall(y_true, y_pred, model_name, threshold=0.5):
+    from sklearn.metrics import recall_score
+    y_pred_binary = (y_pred >= threshold).astype(int)
+    valid = [i for i in range(5)
+             if len(np.unique(y_true[:, i])) > 1]
+    if not valid:
+        print(f"  {model_name}: no valid columns for recall")
+        return None
+    recall = recall_score(
+        y_true[:, valid], y_pred_binary[:, valid],
+        average='macro', zero_division=0
+    )
+    print(f"  {model_name}  recall={recall:.4f}")
+    return float(recall)
 
 # ── 主流程 ────────────────────────────────────────
 if __name__ == "__main__":
@@ -181,23 +196,28 @@ if __name__ == "__main__":
             print(f"\nPredicting with {name}...")
             try:
                 y_pred = predict_fastai(name, mdir, X)
-                results[name] = compute_auc(y_true, y_pred, name)
+                auc = compute_auc(y_true, y_pred, name)
+                recall = compute_recall(y_true, y_pred, name)
+                results[name] = {"auc": auc, "recall": recall}
             except Exception as e:
                 print(f"  Error: {e}")
-                results[name] = None
+                results[name] = {"auc": None, "recall": None}
 
     # ── CfC-NCP ──
-    cfc_files = sorted(glob.glob(f"{SAVED}/cfc_ncp_stft_*.pt"))
-
+    # cfc_files = sorted(glob.glob(f"{SAVED}/cfc_ncp_stft_*.pt"))
+    cfc_files = sorted(glob.glob(f"{BASE}/code/output/ablation/E0_full/superdiagnostic/cfc_ncp_full_*.pt"))
 
     cfc_pt = cfc_files[-1] if cfc_files else None
     print(f"Using CfC weights: {cfc_pt}")
     if os.path.exists(cfc_pt):
         print(f"\nPredicting with cfc_ncp...")
-        from models.cfc_ncp_model import NCPNet
+        # from models.cfc_ncp_model import NCPNet
+        from models.cfc_ncp_full_model import NCPNet
         y_pred = predict_pytorch(NCPNet, cfc_pt, X,
                                  motor_neurons=128, mixed_memory=True)
-        results["cfc_ncp"] = compute_auc(y_true, y_pred, "cfc_ncp")
+        auc = compute_auc(y_true, y_pred, "cfc_ncp")
+        recall = compute_recall(y_true, y_pred, "cfc_ncp")
+        results["cfc_ncp"] = {"auc": auc, "recall": recall}
 
     # # ── LTC-NCP ──
     # ltc_files = sorted(glob.glob(f"{SAVED}/ltc_ncp_stft_*.pt"))
@@ -214,53 +234,105 @@ if __name__ == "__main__":
     print(f"\n{'='*55}")
     print("  Transfer Learning: PTB-XL → CPSC2018")
     print(f"{'='*55}")
-    print(f"  {'Model':<25} {'Transfer AUC':>12}")
-    print(f"  {'-'*39}")
-    for name, auc in results.items():
-        s = f"{auc:.4f}" if auc else "N/A"
-        print(f"  {name:<25} {s:>12}")
-    print(f"{'='*55}")
+    print(f"  {'Model':<25} {'Transfer AUC':>10} {'Transfer Recall':>10}")
+    print(f"  {'-'*47}")
+    for name, metrics in results.items():
+        auc_str = f"{metrics['auc']:.4f}" if metrics['auc'] is not None else "N/A"
+        recall_str = f"{metrics['recall']:.4f}" if metrics['recall'] is not None else "N/A"
+        print(f"  {name:<25} {auc_str:>10} {recall_str:>10}")
+    print(f"{'='*60}")
 
 
-    import matplotlib
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
+    # import matplotlib
+    # matplotlib.use("Agg")
+    # import matplotlib.pyplot as plt
 
-    valid_results = {k: v for k, v in results.items() if v is not None}
-    names = list(valid_results.keys())
-    aucs  = list(valid_results.values())
+    # valid_results = {k: v for k, v in results.items() if v is not None}
+    # names = list(valid_results.keys())
+    # aucs  = list(valid_results.values())
 
-    PALETTE = ["#1565C0", "#E65100", "#2E7D32", "#6A1B9A",
-            "#00838F", "#AD1457", "#4E342E"]
+    # PALETTE = ["#1565C0", "#E65100", "#2E7D32", "#6A1B9A",
+    #         "#00838F", "#AD1457", "#4E342E"]
 
-    fig, ax = plt.subplots(figsize=(10, 5))
-    fig.patch.set_facecolor("#F5F5F5")
-    ax.set_facecolor("#FAFAFA")
+    # fig, ax = plt.subplots(figsize=(10, 5))
+    # fig.patch.set_facecolor("#F5F5F5")
+    # ax.set_facecolor("#FAFAFA")
 
-    bars = ax.bar(names, aucs,
-                color=PALETTE[:len(names)],
-                width=0.5, edgecolor="white", linewidth=1.5)
+    # bars = ax.bar(names, aucs,
+    #             color=PALETTE[:len(names)],
+    #             width=0.5, edgecolor="white", linewidth=1.5)
 
-    auc_min = max(0.0, min(aucs) - 0.05)
-    ax.set_ylim(auc_min, 1.0)
-    ax.set_title("Transfer AUC: PTB-XL → CPSC2018",
-                fontsize=13, fontweight="bold")
-    ax.set_ylabel("Macro AUC")
-    ax.tick_params(axis="x", rotation=18, labelsize=9)
-    ax.grid(axis="y", linestyle="--", alpha=0.6)
+    # auc_min = max(0.0, min(aucs) - 0.05)
+    # ax.set_ylim(auc_min, 1.0)
+    # ax.set_title("Transfer AUC: PTB-XL → CPSC2018",
+    #             fontsize=13, fontweight="bold")
+    # ax.set_ylabel("Macro AUC")
+    # ax.tick_params(axis="x", rotation=18, labelsize=9)
+    # ax.grid(axis="y", linestyle="--", alpha=0.6)
 
-    for bar, val in zip(bars, aucs):
-        ax.text(bar.get_x() + bar.get_width() / 2,
-                bar.get_height() + (1.0 - auc_min) * 0.01,
-                f"{val:.4f}", ha="center", va="bottom",
-                fontsize=8.5, fontweight="bold")
+    # for bar, val in zip(bars, aucs):
+    #     ax.text(bar.get_x() + bar.get_width() / 2,
+    #             bar.get_height() + (1.0 - auc_min) * 0.01,
+    #             f"{val:.4f}", ha="center", va="bottom",
+    #             fontsize=8.5, fontweight="bold")
 
-    plt.tight_layout()
-    out = f"{BASE}/code/output/exp_superdiagnostic/results/plots/transfer_cpsc2018.png"
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    plt.savefig(out, dpi=150, bbox_inches="tight")
-    plt.close()
-    print(f"\n[Plot] saved to {out}")
+    # plt.tight_layout()
+    # out = f"{BASE}/code/output/exp_superdiagnostic/results/plots/transfer_cpsc2018.png"
+    # os.makedirs(os.path.dirname(out), exist_ok=True)
+    # plt.savefig(out, dpi=150, bbox_inches="tight")
+    # plt.close()
+    # print(f"\n[Plot] saved to {out}")
 
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
+valid_results = {k: v for k, v in results.items() 
+                 if v["auc"] is not None}
+names   = list(valid_results.keys())
+aucs    = [valid_results[n]["auc"]    for n in names]
+recalls = [valid_results[n]["recall"] for n in names]
+
+PALETTE = ["#1565C0", "#E65100", "#2E7D32", "#6A1B9A",
+           "#00838F", "#AD1457", "#4E342E"]
+
+fig, axes = plt.subplots(1, 2, figsize=(16, 5))
+fig.patch.set_facecolor("#F5F5F5")
+
+# 左:AUC
+ax = axes[0]
+ax.set_facecolor("#FAFAFA")
+bars = ax.bar(names, aucs, color=PALETTE[:len(names)],
+              width=0.5, edgecolor="white", linewidth=1.5)
+ax.set_ylim(max(0.0, min(aucs)-0.05), 1.0)
+ax.set_title("Transfer AUC: PTB-XL → CPSC2018", fontsize=13, fontweight="bold")
+ax.set_ylabel("Macro AUC")
+ax.tick_params(axis="x", rotation=18, labelsize=9)
+ax.grid(axis="y", linestyle="--", alpha=0.6)
+for bar, val in zip(bars, aucs):
+    ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.005,
+            f"{val:.4f}", ha="center", va="bottom",
+            fontsize=8.5, fontweight="bold")
+
+# 右:Recall
+ax = axes[1]
+ax.set_facecolor("#FAFAFA")
+bars = ax.bar(names, recalls, color=PALETTE[:len(names)],
+              width=0.5, edgecolor="white", linewidth=1.5)
+ax.set_ylim(max(0.0, min(recalls)-0.05), 1.0)
+ax.set_title("Transfer Recall: PTB-XL → CPSC2018", fontsize=13, fontweight="bold")
+ax.set_ylabel("Macro Recall (threshold=0.5)")
+ax.tick_params(axis="x", rotation=18, labelsize=9)
+ax.grid(axis="y", linestyle="--", alpha=0.6)
+for bar, val in zip(bars, recalls):
+    ax.text(bar.get_x()+bar.get_width()/2, bar.get_height()+0.005,
+            f"{val:.4f}", ha="center", va="bottom",
+            fontsize=8.5, fontweight="bold")
+
+plt.tight_layout()
+out = f"{BASE}/code/output/exp_superdiagnostic/results/plots/transfer_cpsc2018.png"
+os.makedirs(os.path.dirname(out), exist_ok=True)
+plt.savefig(out, dpi=150, bbox_inches="tight", facecolor=fig.get_facecolor())
+plt.close()
+print(f"\n[Plot] saved to {out}")
 

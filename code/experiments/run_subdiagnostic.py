@@ -255,19 +255,30 @@ OUTPUTFOLDER = "./output/"
 
 models = [
     
+    # {
+    #     "modelname":  "cfc_ncp",
+    #     "modeltype":  "CFC_NCP",
+    #     "parameters": {
+    #         "motor_neurons": 128, #default=64
+    #         "mixed_memory":  True,
+    #         "epochs":        50,
+    #         "batch_size":    256,
+    #         "lr":            0.002,
+    #     }
+    # },
+
     {
-        "modelname":  "cfc_ncp",
-        "modeltype":  "CFC_NCP",
+        "modelname": "cfc_ncp_full",
+        "modeltype": "CFC_NCP_FULL",
         "parameters": {
-            "motor_neurons": 128, #default=64
+            "motor_neurons": 128,
             "mixed_memory":  True,
             "epochs":        50,
             "batch_size":    256,
             "lr":            0.002,
         }
     },
-
-
+    
     {
         "modelname": "cfc_ncp_no_stft",
         "modeltype": "CFC_NCP_NO_STFT",
@@ -303,78 +314,78 @@ models = [
         }
     },
 
-    {
-        "modelname": "ltc_ncp",
-        "modeltype": "LTC_NCP",
-        "parameters": {
-            "motor_neurons": 128,
-            "mixed_memory":  True,
-            "epochs":        50,
-            "batch_size":    32,
-            "lr":            0.002,
-        }
-    },
+    # {
+    #     "modelname": "ltc_ncp",
+    #     "modeltype": "LTC_NCP",
+    #     "parameters": {
+    #         "motor_neurons": 128,
+    #         "mixed_memory":  True,
+    #         "epochs":        50,
+    #         "batch_size":    32,
+    #         "lr":            0.002,
+    #     }
+    # },
     
-    {
-        "modelname": "fastai_xresnet1d101",
-        "modeltype": "FASTAI",
-        "parameters": {
-            "epochs": 50,
-            "lr":     0.001,
-        }
-    },
+    # {
+    #     "modelname": "fastai_xresnet1d101",
+    #     "modeltype": "FASTAI",
+    #     "parameters": {
+    #         "epochs": 50,
+    #         "lr":     0.001,
+    #     }
+    # },
 
     
 
-    {
-        "modelname": "fastai_inception1d",
-        "modeltype": "FASTAI",
-        "parameters": {
-            "epochs": 50,
-            "lr":     0.001,
-        }
-    },
+    # {
+    #     "modelname": "fastai_inception1d",
+    #     "modeltype": "FASTAI",
+    #     "parameters": {
+    #         "epochs": 50,
+    #         "lr":     0.001,
+    #     }
+    # },
 
-    {
-        "modelname": "fastai_lstm",
-        "modeltype": "FASTAI",
-        "parameters":{
-            "epochs": 50,
-            "lr": 0.001,
-        }
-    },
+    # {
+    #     "modelname": "fastai_lstm",
+    #     "modeltype": "FASTAI",
+    #     "parameters":{
+    #         "epochs": 50,
+    #         "lr": 0.001,
+    #     }
+    # },
 
-    {
-        "modelname": "fastai_gru",
-        "modeltype": "FASTAI",
-        "parameters":{
-            "epochs": 50,
-            "lr": 0.001,
-        }
-    },
+    # {
+    #     "modelname": "fastai_gru",
+    #     "modeltype": "FASTAI",
+    #     "parameters":{
+    #         "epochs": 50,
+    #         "lr": 0.001,
+    #     }
+    # },
 
-    {
-        "modelname": "fastai_resnet1d_wang",
-        "modeltype": "FASTAI",
-        "parameters":{
-            "epochs": 50,
-            "lr": 0.001,
-        }
-    },
+    # {
+    #     "modelname": "fastai_resnet1d_wang",
+    #     "modeltype": "FASTAI",
+    #     "parameters":{
+    #         "epochs": 50,
+    #         "lr": 0.001,
+    #     }
+    # },
 
-    {
-        "modelname": "wavelet_rf",
-        "modeltype": "WAVELET",
-        "parameters": {
-            "classifier": "NN",   # can be choosen from RF / LR / NN
-        }
-    },
+    # {
+    #     "modelname": "wavelet_rf",
+    #     "modeltype": "WAVELET",
+    #     "parameters": {
+    #         "classifier": "NN",   # can be choosen from RF / LR / NN
+    #     }
+    # },
 
-    {
-        "modelname": "ctrnn",
-        "modeltype": "CTRNN_FAMILY",
-        "parameters": { "model_type": "ctrnn", "hidden_size": 64, "epochs": 50, "lr": 0.001 }
-    },
+    # {
+    #     "modelname": "ctrnn",
+    #     "modeltype": "CTRNN_FAMILY",
+    #     "parameters": { "model_type": "ctrnn", "hidden_size": 64, "epochs": 50, "lr": 0.001 }
+    # },
     # {
     #     "modelname": "node",
     #     "modeltype": "CTRNN_FAMILY",
@@ -415,6 +426,9 @@ def patched_perform(self):
 
         if modeltype == "CFC_NCP":
             from models.cfc_ncp_model import NCPClassifier
+            raw_model = NCPClassifier(**modelparams, task=self.task)
+        elif modeltype == "CFC_NCP_FULL":
+            from models.cfc_ncp_full_model import NCPClassifier
             raw_model = NCPClassifier(**modelparams, task=self.task)
         elif modeltype == "CFC_NCP_NO_STFT":
             from models.cfc_ncp_no_stft_model import NCPClassifier

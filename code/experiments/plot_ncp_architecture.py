@@ -144,17 +144,17 @@ import matplotlib.colors as mcolors
 
 # ══════════════════════════════════════════════════════════════════════════════
 #  ★ 修改这里 ★
-PT_FILE = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/code/saved_models/cfc_ncp_stft_20260519_114735.pt"
+PT_FILE  = "/scratch2/bsc26f19/projects/bachelor_thesis_codes/code/output/ablation/E0_full/superdiagnostic/cfc_ncp_full_20260601_013939.pt"
 TOP_K_PER_PAIR = 60      # 每对层最多显示的连线数（按权重取最大）
 # ══════════════════════════════════════════════════════════════════════════════
 
 OUT_FILE = os.path.join(os.path.dirname(os.path.abspath(PT_FILE)),
                         "cfc_ncp_wiring_weights.png")
 
-SENSORY_N = 64
-INTER_N   = 32
-COMMAND_N = 16
-MOTOR_N   = 64
+SENSORY_N = 32 #64
+INTER_N   = 16 #32
+COMMAND_N = 8 #16
+MOTOR_N   = 64 #128
 N_CLASSES = 5
 
 # ── 1. 加载权重，提取每层有效连接矩阵 ────────────────────────────────────────
